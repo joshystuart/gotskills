@@ -1,0 +1,84 @@
+name: PR Electron Build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'app/**'
+      - '.github/workflows/pr-electron.yml'
+      - '.github/workflows/electron-release.yml'
+      - '.prettierrc'
+      - '.prettierignore'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  prettier-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prettier check
+        run: npm run format:check
+
+  electron-build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: app
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: app
+        run: npm test
+
+      - name: Test app size check
+        working-directory: app
+        run: node --test scripts/check-app-size.test.cjs
+
+      - name: Package electron app (unsigned, unpacked)
+        working-directory: app
+        run: npm run package:dir
+
+      - name: Check installed app size
+        working-directory: app
+        run: scripts/check-app-size.sh
+
+      - name: Smoke test packaged skills CLI
+        working-directory: app
+        run: scripts/smoke-packaged-cli.sh
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: app/test-results/
+          if-no-files-found: ignore

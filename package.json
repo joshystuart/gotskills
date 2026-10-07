@@ -1,0 +1,13 @@
+{
+  "name": "igotskills",
+  "private": true,
+  "description": "Got Skills — agent skill manager and libraries",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run format:check && cd app && npm run typecheck && npm test && node --test scripts/check-app-size.test.cjs"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.9"
+  }
+}
