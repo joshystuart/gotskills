@@ -11,9 +11,11 @@ Separate Apple Silicon (`arm64`) and Intel (`x64`) macOS DMGs and App Update zip
 | `npm run build`         | Alias of `build:dev` for day-to-day local packaging.                                                                                                               |
 | `npm run package:dir`   | Compile + unsigned arm64 app in `dist/mac-arm64/` via `electron-builder.dev.config.mjs`.                                                                           |
 
-Artifact paths: `dist/Got Skills-<version>-arm64.dmg`,
-`dist/Got Skills-<version>-x64.dmg`, and matching per-architecture `.zip`
-files and `.blockmap` files. `dist/latest-mac.yml` lists both zips so App
+Artifact paths: `dist/Got-Skills-<version>-arm64.dmg`,
+`dist/Got-Skills-<version>-x64.dmg`, and matching per-architecture `.zip`
+files and `.blockmap` files. The names use a hyphen, not the product name's
+space, so they match `latest-mac.yml` and GitHub has nothing to rewrite on
+upload. `dist/latest-mac.yml` lists both zips so App
 Update selects the running Mac's architecture. All are produced in one
 build. The dev configuration inherits these targets from the release
 configuration. Packaged resources include `app-update.yml` with the GitHub
@@ -154,6 +156,12 @@ before making the repository public.
 | `APPLE_ID`                    | Apple ID for notarization                       |
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password                           |
 | `APPLE_TEAM_ID`               | 10-character Team ID                            |
+
+Before uploading, the workflow runs `node scripts/checkUpdateFeed.mjs dist`.
+It fails, naming the file, when `latest-mac.yml` lists a file that isn't in
+`dist/` under that exact name, or a name holding a space or any character
+other than letters, digits, `.`, `-` and `_`. Nothing is published when it
+fails.
 
 Artifacts uploaded: every `app/dist/*.dmg`, `app/dist/*.zip`,
 `app/dist/*.blockmap` and `app/dist/latest-mac.yml`. Keep all these files
