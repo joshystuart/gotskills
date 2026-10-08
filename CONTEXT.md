@@ -20,6 +20,10 @@ _Avoid_: Cache
 A registry whose configuration and snapshot are retained but which does not sync or contribute available skills to the catalogue. Skills already installed from it remain visible as installed-only entries.
 _Avoid_: Removed registry, paused sync
 
+**Registry Colour**:
+The colour that marks a registry and its skills across the app, either chosen by the user or assigned automatically from a palette. A disabled registry is shown grey whatever its colour.
+_Avoid_: Registry dot, tag colour
+
 **Auto Update**:
 A per-registry setting, off unless the user turns it on, under which every successful sync brings that registry's installed skills up to its latest snapshot. It only updates installed skills; it never installs, repairs or removes them.
 _Avoid_: Auto sync, auto install

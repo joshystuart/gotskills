@@ -267,4 +267,71 @@ describe('backend (AppApi seam)', () => {
     expect(snapshot.skills.map((s) => s.folderName)).toEqual(['one'])
     second.close()
   })
+
+  describe('Registry Colour', () => {
+    async function freshBackend(): Promise<{ backend: Backend; userData: string; home: string }> {
+      const userData = mkdtempSync(join(tmpdir(), 'igs-backend-'))
+      const home = mkdtempSync(join(tmpdir(), 'igs-home-'))
+      dirs.push(userData, home)
+      const backend = createBackend({
+        paths: { userData },
+        syncIntervalMs: 0,
+        homeDir: home,
+        ...fakeHomeDetection(home),
+      })
+      return { backend, userData, home }
+    }
+
+    it('comes back as null for a Registry nobody has coloured', async () => {
+      const { backend } = await freshBackend()
+      const [seeded] = await backend.listRegistries()
+      expect(seeded.colour).toBeNull()
+      backend.close()
+    })
+
+    it('stores a chosen colour as lowercase hex and keeps it across relaunch', async () => {
+      const { backend, userData, home } = await freshBackend()
+      const [seeded] = await backend.listRegistries()
+
+      const updated = await backend.updateRegistry({ id: seeded.id, colour: '#AABBCC' })
+      expect(updated.colour).toBe('#aabbcc')
+      backend.close()
+
+      const relaunched = createBackend({
+        paths: { userData },
+        syncIntervalMs: 0,
+        homeDir: home,
+        ...fakeHomeDetection(home),
+      })
+      const [reloaded] = await relaunched.listRegistries()
+      expect(reloaded.colour).toBe('#aabbcc')
+      relaunched.close()
+    })
+
+    it.each(['red', '#fff', 'url(x)'])(
+      'rejects %s and leaves the stored colour unchanged',
+      async (colour) => {
+        const { backend } = await freshBackend()
+        const [seeded] = await backend.listRegistries()
+        await backend.updateRegistry({ id: seeded.id, colour: '#123456' })
+
+        await expect(backend.updateRegistry({ id: seeded.id, colour })).rejects.toThrow()
+
+        const [after] = await backend.listRegistries()
+        expect(after.colour).toBe('#123456')
+        backend.close()
+      }
+    )
+
+    it('keeps the colour when other fields change', async () => {
+      const { backend } = await freshBackend()
+      const [seeded] = await backend.listRegistries()
+      await backend.updateRegistry({ id: seeded.id, colour: '#123456' })
+
+      const updated = await backend.updateRegistry({ id: seeded.id, enabled: false })
+
+      expect(updated.colour).toBe('#123456')
+      backend.close()
+    })
+  })
 })

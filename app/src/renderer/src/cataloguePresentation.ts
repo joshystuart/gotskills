@@ -181,8 +181,14 @@ export function registryColour(registryId: string): string {
   return REGISTRY_PALETTE[hash % REGISTRY_PALETTE.length]
 }
 
-export function registryDotColour(registryId: string, enabled: boolean): string {
-  return enabled ? registryColour(registryId) : DISABLED_REGISTRY_COLOUR
+/** The Registry Colour a dot shows: grey when disabled, else the chosen colour, else the palette's. */
+export function registryDotColour(registry: {
+  id: string
+  enabled: boolean
+  colour: string | null
+}): string {
+  if (!registry.enabled) return DISABLED_REGISTRY_COLOUR
+  return registry.colour ?? registryColour(registry.id)
 }
 
 export function targetLabel(targets: InstallTargetStatus[], target: InstallTargetId): string {

@@ -115,6 +115,8 @@ export interface RegistryRecord {
   githubOwner: string | null
   /** GitHub repo name when the URL is a GitHub repository; otherwise null. */
   githubRepo: string | null
+  /** Chosen Registry Colour as lowercase `#rrggbb`; null means the automatic colour. */
+  colour: string | null
   syncStatus: RegistrySyncStatus
 }
 
@@ -131,6 +133,8 @@ export interface UpdateRegistryRequest {
   branch?: string
   enabled?: boolean
   autoUpdate?: boolean
+  /** A `#rrggbb` hex colour; stored lowercase. */
+  colour?: string
 }
 
 /** @deprecated Prefer RegistryRecord; retained only while callers migrate. */

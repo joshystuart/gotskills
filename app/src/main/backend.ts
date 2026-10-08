@@ -260,6 +260,7 @@ export function createBackend(options: BackendOptions): Backend {
       autoUpdate: registry.autoUpdate,
       githubOwner: registry.githubOwner,
       githubRepo: registry.githubRepo,
+      colour: registry.colour,
       syncStatus: registryStatus(registry.id),
     }
   }
@@ -707,6 +708,13 @@ export function createBackend(options: BackendOptions): Backend {
 
       if (req.autoUpdate !== undefined) {
         fields.autoUpdate = req.autoUpdate
+      }
+
+      if (req.colour !== undefined) {
+        if (!/^#[0-9a-f]{6}$/i.test(req.colour)) {
+          throw new Error(`"${req.colour}" is not a #rrggbb colour.`)
+        }
+        fields.colour = req.colour.toLowerCase()
       }
 
       const updated = updateRegistry(db, req.id, fields)

@@ -103,7 +103,7 @@ export function Sidebar({
               <span className="nav-label">
                 <span
                   className="dot"
-                  style={{ background: registryDotColour(registry.id, registry.enabled) }}
+                  style={{ background: registryDotColour(registry) }}
                   aria-hidden="true"
                 />
                 <span>{registryRecordLabel(registry)}</span>

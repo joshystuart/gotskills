@@ -30,6 +30,7 @@ const DEFAULT_REGISTRY_RECORD: RegistryRecord = {
   autoUpdate: false,
   githubOwner: 'anthropics',
   githubRepo: 'skills',
+  colour: null,
   syncStatus: { registryId: 'default', phase: 'synced', lastSyncedAt: null },
 }
 
@@ -297,6 +298,7 @@ describe('App shell', () => {
       autoUpdate: false,
       githubOwner: 'example-org',
       githubRepo: 'skills',
+      colour: null,
       syncStatus: { registryId: 'reg-2', phase: 'synced', lastSyncedAt: null },
     }
     const skills = [
@@ -1904,6 +1906,47 @@ describe('Catalogue table', () => {
       within(screen.getByRole('listitem')).getByRole('img', { name: 'team/skills' })
     ).toBeInTheDocument()
   })
+
+  it('shows a chosen Registry Colour on the sidebar and catalogue dots', async () => {
+    const skills = [
+      skill({ id: 'alpha', name: 'Alpha', description: 'First skill', registryId: 'default' }),
+    ]
+    render(
+      <App
+        api={fakeApi(syncStatus(), skills, {
+          listRegistries: vi.fn().mockResolvedValue([registryRecord({ colour: '#aabbcc' })]),
+        })}
+      />
+    )
+    await screen.findByText('Alpha')
+
+    expect(registryButton('anthropics/skills').querySelector('.dot')).toHaveStyle({
+      background: '#aabbcc',
+    })
+    expect(
+      within(screen.getByRole('listitem')).getByRole('img', { name: 'anthropics/skills' })
+    ).toHaveStyle({ background: '#aabbcc' })
+  })
+
+  it('shows a disabled Registry grey even when it has a chosen colour', async () => {
+    render(
+      <App
+        api={fakeApi(syncStatus(), [], {
+          listRegistries: vi
+            .fn()
+            .mockResolvedValue([registryRecord({ enabled: false, colour: '#aabbcc' })]),
+        })}
+      />
+    )
+    await screen.findByRole('navigation', { name: 'Registries' })
+
+    expect(registryButton('anthropics/skills').querySelector('.dot')).toHaveStyle({
+      background: '#5b5b64',
+    })
+    await openSettings()
+    const [row] = within(screen.getByRole('main', { name: 'Settings' })).getAllByRole('listitem')
+    expect(row.querySelector('.dot')).toHaveStyle({ background: '#5b5b64' })
+  })
 })
 
 describe('Catalogue empty states', () => {
@@ -2191,6 +2234,120 @@ describe('Settings registry list', () => {
     })
     expect(api.updateRegistry).toHaveBeenLastCalledWith({ id: 'default', autoUpdate: false })
     expect(toggle).not.toBeChecked()
+  })
+
+  it('previews a picked Registry Colour on the Settings dot without saving it', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([registryRecord({ colour: '#aabbcc' })]),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    const button = screen.getByRole('button', { name: 'Change colour for anthropics/skills' })
+    const input = screen.getByLabelText<HTMLInputElement>('Colour for anthropics/skills')
+    const opened = vi.fn()
+    input.addEventListener('click', opened)
+
+    fireEvent.click(button)
+    expect(opened).toHaveBeenCalledOnce()
+    expect(input).toHaveValue('#aabbcc')
+
+    fireEvent.input(input, { target: { value: '#112233' } })
+    expect(button.querySelector('.dot')).toHaveStyle({ background: '#112233' })
+    expect(api.updateRegistry).not.toHaveBeenCalled()
+  })
+
+  it('saves a picked Registry Colour once when the picker closes and shows it everywhere', async () => {
+    const registries = [registryRecord()]
+    const skills = [
+      skill({ id: 'alpha', name: 'Alpha', description: 'First skill', registryId: 'default' }),
+    ]
+    const api = fakeApi(syncStatus(), skills, {
+      listRegistries: vi.fn().mockImplementation(async () => registries),
+      updateRegistry: vi.fn().mockImplementation(async (req) => {
+        registries[0] = registryRecord({ colour: req.colour })
+        return registries[0]
+      }),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Alpha')
+    await openSettings()
+    const input = screen.getByLabelText('Colour for anthropics/skills')
+    const registryReads = vi.mocked(api.listRegistries).mock.calls.length
+
+    fireEvent.input(input, { target: { value: '#112233' } })
+    fireEvent.input(input, { target: { value: '#445566' } })
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '#445566' } })
+    })
+
+    expect(api.updateRegistry).toHaveBeenCalledOnce()
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', colour: '#445566' })
+    expect(vi.mocked(api.listRegistries).mock.calls.length).toBeGreaterThan(registryReads)
+    expect(
+      screen
+        .getByRole('button', { name: 'Change colour for anthropics/skills' })
+        .querySelector('.dot')
+    ).toHaveStyle({ background: '#445566' })
+    expect(registryButton('anthropics/skills').querySelector('.dot')).toHaveStyle({
+      background: '#445566',
+    })
+    fireEvent.click(viewButton('Catalogue'))
+    expect(
+      within(await screen.findByRole('listitem')).getByRole('img', { name: 'anthropics/skills' })
+    ).toHaveStyle({ background: '#445566' })
+  })
+
+  it('shows a rejected Registry Colour save and puts the saved colour back', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([registryRecord({ colour: '#aabbcc' })]),
+      updateRegistry: vi.fn().mockRejectedValue(new Error('Colour must be #rrggbb hex')),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    const input = screen.getByLabelText('Colour for anthropics/skills')
+
+    fireEvent.input(input, { target: { value: '#112233' } })
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '#112233' } })
+    })
+
+    expect(
+      within(screen.getByRole('region', { name: 'Registries' })).getByRole('alert')
+    ).toHaveTextContent('Colour must be #rrggbb hex')
+    expect(
+      screen
+        .getByRole('button', { name: 'Change colour for anthropics/skills' })
+        .querySelector('.dot')
+    ).toHaveStyle({ background: '#aabbcc' })
+    expect(input).toHaveValue('#aabbcc')
+  })
+
+  it('offers no colour button on a disabled Registry or the edit row', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([
+        registryRecord({ id: 'default', colour: '#aabbcc' }),
+        registryRecord({
+          id: 'team',
+          url: 'https://github.com/team/skills',
+          enabled: false,
+          colour: '#aabbcc',
+          githubOwner: 'team',
+          githubRepo: 'skills',
+        }),
+      ]),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+
+    expect(screen.queryByRole('button', { name: 'Change colour for team/skills' })).toBeNull()
+    expect(screen.queryByLabelText('Colour for team/skills')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit anthropics/skills' }))
+    expect(screen.queryByRole('button', { name: /^Change colour for/ })).toBeNull()
+    expect(screen.queryByLabelText(/^Colour for/)).toBeNull()
   })
 
   it('keeps a disabled Registry Auto Update value visible and unchangeable', async () => {
@@ -2702,6 +2859,7 @@ describe('Update all', () => {
       autoUpdate: false,
       githubOwner: 'example-org',
       githubRepo: 'skills',
+      colour: null,
       syncStatus: { registryId: 'reg-2', phase: 'synced', lastSyncedAt: null },
     }
     const skills = [
