@@ -9,7 +9,7 @@ import { syncRegistry, type SyncRegistryFn } from './sync'
 import { fakeHomeDetection } from './fakeHome'
 
 function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim()
 }
 
 function writeSkill(root: string, id: string): void {

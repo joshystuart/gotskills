@@ -20,6 +20,10 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 Run `npm run check` from the repository root before handing back work.
 
+## Commits
+
+Don't add author or attribution lines to commit messages, such as `Co-Authored-By` trailers or Claude or Codex names.
+
 ## Releases
 
 For a feature or a fix, bump the patch version in `app/package.json` and `app/package-lock.json` in the same PR, because merging a new version to `main` publishes a release. Refactors, tests and docs don't bump.

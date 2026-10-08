@@ -10,7 +10,7 @@ import { scanSkills } from './scan'
  * (spec Testing Decisions + ticket 2 acceptance).
  */
 function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim()
 }
 
 function writeSkill(
@@ -37,7 +37,7 @@ describe('scanSkills (temp git repo)', () => {
   function makeRepo(): string {
     const root = mkdtempSync(join(tmpdir(), 'igs-scan-'))
     dirs.push(root)
-    git(root, 'init')
+    git(root, 'init', '-b', 'main')
     git(root, 'config', 'user.email', 'test@example.com')
     git(root, 'config', 'user.name', 'Test')
     return root
