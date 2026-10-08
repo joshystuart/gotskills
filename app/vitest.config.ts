@@ -11,6 +11,7 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}', 'scripts/**/*.test.ts'],
     testTimeout: gitIntegrationTestTimeoutMs,
+    silent: 'passed-only',
     reporters: ['default', 'junit'],
     outputFile: { junit: './test-results/junit.xml' },
   },
