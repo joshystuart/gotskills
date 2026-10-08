@@ -14,7 +14,7 @@ export default {
   files: ['out/**'],
   asarUnpack: [...dependencyUnpackGlobs('skills', projectDir)],
   electronLanguages: ['en'],
-  artifactName: '${productName}-${version}-${arch}.${ext}',
+  artifactName: 'Got-Skills-${version}-${arch}.${ext}',
   publish: { provider: 'github', owner: 'joshystuart', repo: 'gotskills' },
   afterPack: ({ targets }) => {
     for (const target of targets) {
@@ -44,7 +44,7 @@ export default {
   },
   dmg: {
     title: 'Got Skills',
-    artifactName: '${productName}-${version}-${arch}.${ext}',
+    artifactName: 'Got-Skills-${version}-${arch}.${ext}',
     format: 'ULFO',
     window: { width: 660, height: 400 },
     iconSize: 128,

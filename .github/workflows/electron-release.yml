@@ -152,6 +152,11 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run build:release
 
+      - name: Check update feed against release files
+        if: steps.release.outputs.skip != 'true'
+        working-directory: app
+        run: node scripts/checkUpdateFeed.mjs dist
+
       - name: Create or update GitHub Release
         if: steps.release.outputs.skip != 'true'
         uses: softprops/action-gh-release@v3
