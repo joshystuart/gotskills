@@ -1,5 +1,5 @@
 import type { JSX } from 'react'
-import type { InstallTargetStatus, SkillSummary } from '../../shared/ipc'
+import type { InstallTargetStatus, RegistryRecord, SkillSummary } from '../../shared/ipc'
 import { registryDotColour, rowAttention, targetsWithSkill } from './cataloguePresentation'
 
 interface CatalogueListProps {
@@ -7,7 +7,7 @@ interface CatalogueListProps {
   targets: InstallTargetStatus[]
   selectedId: string | null
   emptyMessage: string
-  registryEnabled: Map<string, boolean>
+  registriesById: Map<string, RegistryRecord>
   onSelect: (skillId: string) => void
 }
 
@@ -58,7 +58,7 @@ export function CatalogueList({
   targets,
   selectedId,
   emptyMessage,
-  registryEnabled,
+  registriesById,
   onSelect,
 }: CatalogueListProps): JSX.Element {
   return (
@@ -88,8 +88,11 @@ export function CatalogueList({
                     title={skill.registryLabel}
                     style={{
                       background: registryDotColour(
-                        skill.registryId,
-                        registryEnabled.get(skill.registryId) !== false
+                        registriesById.get(skill.registryId) ?? {
+                          id: skill.registryId,
+                          enabled: true,
+                          colour: null,
+                        }
                       ),
                     }}
                   />

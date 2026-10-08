@@ -68,11 +68,7 @@ function skillCountLabel(count: number): string {
 
 function RegistryDot({ registry }: { registry: RegistryRecord }): JSX.Element {
   return (
-    <span
-      className="dot"
-      style={{ background: registryDotColour(registry.id, registry.enabled) }}
-      aria-hidden="true"
-    />
+    <span className="dot" style={{ background: registryDotColour(registry) }} aria-hidden="true" />
   )
 }
 

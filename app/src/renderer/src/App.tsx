@@ -379,11 +379,11 @@ export function App({ api }: AppProps): JSX.Element {
     searchQuery
   )
   const selected = skills.find((s) => s.id === selectedId) ?? null
-  const registryEnabled = new Map(registries.map((r) => [r.id, r.enabled]))
+  const registriesById = new Map(registries.map((r) => [r.id, r]))
 
   /** Installed entries whose supplying Registry is disabled or removed (orphaned). */
   function isInstalledOnly(skill: SkillSummary): boolean {
-    return skill.orphaned || registryEnabled.get(skill.registryId) === false
+    return skill.orphaned || registriesById.get(skill.registryId)?.enabled === false
   }
 
   const installedOnly = selected ? isInstalledOnly(selected) : false
@@ -680,7 +680,7 @@ export function App({ api }: AppProps): JSX.Element {
                   targets={visibleTargets}
                   selectedId={selectedId}
                   emptyMessage={emptyMessage}
-                  registryEnabled={registryEnabled}
+                  registriesById={registriesById}
                   onSelect={setSelectedId}
                 />
               </section>

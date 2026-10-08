@@ -9,6 +9,7 @@ import { MIGRATION_006_SQL } from './migrations/006_registry_auto_update'
 import { MIGRATION_007_SQL } from './migrations/007_install_target_ids'
 
 import { MIGRATION_008_SQL } from './migrations/008_app_setting'
+import { MIGRATION_009_SQL } from './migrations/009_registry_colour'
 
 const MIGRATIONS: { version: number; sql: string }[] = [
   { version: 1, sql: MIGRATION_001_SQL },
@@ -19,6 +20,7 @@ const MIGRATIONS: { version: number; sql: string }[] = [
   { version: 6, sql: MIGRATION_006_SQL },
   { version: 7, sql: MIGRATION_007_SQL },
   { version: 8, sql: MIGRATION_008_SQL },
+  { version: 9, sql: MIGRATION_009_SQL },
 ]
 
 /**

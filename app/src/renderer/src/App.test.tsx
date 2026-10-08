@@ -30,6 +30,7 @@ const DEFAULT_REGISTRY_RECORD: RegistryRecord = {
   autoUpdate: false,
   githubOwner: 'anthropics',
   githubRepo: 'skills',
+  colour: null,
   syncStatus: { registryId: 'default', phase: 'synced', lastSyncedAt: null },
 }
 
@@ -297,6 +298,7 @@ describe('App shell', () => {
       autoUpdate: false,
       githubOwner: 'example-org',
       githubRepo: 'skills',
+      colour: null,
       syncStatus: { registryId: 'reg-2', phase: 'synced', lastSyncedAt: null },
     }
     const skills = [
@@ -1904,6 +1906,47 @@ describe('Catalogue table', () => {
       within(screen.getByRole('listitem')).getByRole('img', { name: 'team/skills' })
     ).toBeInTheDocument()
   })
+
+  it('shows a chosen Registry Colour on the sidebar and catalogue dots', async () => {
+    const skills = [
+      skill({ id: 'alpha', name: 'Alpha', description: 'First skill', registryId: 'default' }),
+    ]
+    render(
+      <App
+        api={fakeApi(syncStatus(), skills, {
+          listRegistries: vi.fn().mockResolvedValue([registryRecord({ colour: '#aabbcc' })]),
+        })}
+      />
+    )
+    await screen.findByText('Alpha')
+
+    expect(registryButton('anthropics/skills').querySelector('.dot')).toHaveStyle({
+      background: '#aabbcc',
+    })
+    expect(
+      within(screen.getByRole('listitem')).getByRole('img', { name: 'anthropics/skills' })
+    ).toHaveStyle({ background: '#aabbcc' })
+  })
+
+  it('shows a disabled Registry grey even when it has a chosen colour', async () => {
+    render(
+      <App
+        api={fakeApi(syncStatus(), [], {
+          listRegistries: vi
+            .fn()
+            .mockResolvedValue([registryRecord({ enabled: false, colour: '#aabbcc' })]),
+        })}
+      />
+    )
+    await screen.findByRole('navigation', { name: 'Registries' })
+
+    expect(registryButton('anthropics/skills').querySelector('.dot')).toHaveStyle({
+      background: '#5b5b64',
+    })
+    await openSettings()
+    const [row] = within(screen.getByRole('main', { name: 'Settings' })).getAllByRole('listitem')
+    expect(row.querySelector('.dot')).toHaveStyle({ background: '#5b5b64' })
+  })
 })
 
 describe('Catalogue empty states', () => {
@@ -2702,6 +2745,7 @@ describe('Update all', () => {
       autoUpdate: false,
       githubOwner: 'example-org',
       githubRepo: 'skills',
+      colour: null,
       syncStatus: { registryId: 'reg-2', phase: 'synced', lastSyncedAt: null },
     }
     const skills = [

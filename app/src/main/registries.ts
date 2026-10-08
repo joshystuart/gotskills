@@ -17,6 +17,8 @@ export interface StoredRegistry {
   githubOwner: string | null
   githubRepo: string | null
   canonicalKey: string
+  /** Chosen Registry Colour as lowercase `#rrggbb`; null means the automatic colour. */
+  colour: string | null
   /** ISO-8601 when soft-removed; null while active. */
   removedAt: string | null
   createdAt: string
@@ -41,6 +43,7 @@ interface RegistryRow {
   github_owner: string | null
   github_repo: string | null
   canonical_key: string
+  colour: string | null
   removed_at: string | null
   created_at: string
   updated_at: string
@@ -64,6 +67,7 @@ function toStored(row: RegistryRow): StoredRegistry {
     githubOwner: row.github_owner,
     githubRepo: row.github_repo,
     canonicalKey: row.canonical_key,
+    colour: row.colour,
     removedAt: row.removed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -158,6 +162,7 @@ export interface UpdateRegistryFields {
   githubOwner?: string | null
   githubRepo?: string | null
   canonicalKey?: string
+  colour?: string
 }
 
 export function updateRegistry(
@@ -176,13 +181,14 @@ export function updateRegistry(
     githubOwner: fields.githubOwner !== undefined ? fields.githubOwner : current.githubOwner,
     githubRepo: fields.githubRepo !== undefined ? fields.githubRepo : current.githubRepo,
     canonicalKey: fields.canonicalKey ?? current.canonicalKey,
+    colour: fields.colour ?? current.colour,
     updatedAt: new Date().toISOString(),
   }
   db.prepare(
     `UPDATE registry SET
        url = @url, branch = @branch, enabled = @enabled, auto_update = @auto_update,
        github_owner = @github_owner, github_repo = @github_repo,
-       canonical_key = @canonical_key, updated_at = @updated_at
+       canonical_key = @canonical_key, colour = @colour, updated_at = @updated_at
      WHERE id = @id`
   ).run({
     id,
@@ -193,6 +199,7 @@ export function updateRegistry(
     github_owner: next.githubOwner,
     github_repo: next.githubRepo,
     canonical_key: next.canonicalKey,
+    colour: next.colour,
     updated_at: next.updatedAt,
   })
   return next
