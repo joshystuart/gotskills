@@ -344,6 +344,19 @@ export function App({ api }: AppProps): JSX.Element {
     }
   }
 
+  async function onChangeColour(registry: RegistryRecord, colour: string): Promise<void> {
+    setRegistryBusy(true)
+    setRegistryError(null)
+    try {
+      await api.updateRegistry({ id: registry.id, colour })
+      await refreshAfterRegistryChange()
+    } catch (err) {
+      setRegistryError(errorMessage(err))
+    } finally {
+      setRegistryBusy(false)
+    }
+  }
+
   async function onSyncRegistry(registry: RegistryRecord): Promise<void> {
     setRegistryBusy(true)
     setRegistryError(null)
@@ -648,6 +661,7 @@ export function App({ api }: AppProps): JSX.Element {
             }}
             onToggleEnabled={onToggleEnabled}
             onToggleAutoUpdate={onToggleAutoUpdate}
+            onChangeColour={onChangeColour}
             onSyncRegistry={onSyncRegistry}
             onRemoveRegistry={setPendingRegistryRemoval}
           />

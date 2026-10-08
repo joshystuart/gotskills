@@ -1380,6 +1380,24 @@ button:disabled {
   margin: 0;
 }
 
+.dot-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+}
+
+.dot-button:hover .dot {
+  transform: scale(1.4);
+}
+
 .registry-url {
   margin: 3px 0 0 15px;
   overflow: hidden;

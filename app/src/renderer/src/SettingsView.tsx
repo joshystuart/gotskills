@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, JSX } from 'react'
 import type { RegistryRecord, SupportedAgent } from '../../shared/ipc'
 import {
@@ -42,6 +42,7 @@ interface SettingsViewProps {
   addForm: AddRegistryForm
   onToggleEnabled: (registry: RegistryRecord) => void
   onToggleAutoUpdate: (registry: RegistryRecord) => void
+  onChangeColour: (registry: RegistryRecord, colour: string) => Promise<void>
   onSyncRegistry: (registry: RegistryRecord) => void
   onRemoveRegistry: (registry: RegistryRecord) => void
 }
@@ -72,12 +73,64 @@ function RegistryDot({ registry }: { registry: RegistryRecord }): JSX.Element {
   )
 }
 
+interface RegistryColourPickerProps {
+  registry: RegistryRecord
+  name: string
+  onChangeColour: (registry: RegistryRecord, colour: string) => Promise<void>
+}
+
+/** The picker's native change event fires once on close; React's onChange fires on every drag. */
+function RegistryColourPicker({
+  registry,
+  name,
+  onChangeColour,
+}: RegistryColourPickerProps): JSX.Element {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const savedColour = registryDotColour(registry)
+  const [preview, setPreview] = useState<string | null>(null)
+  const colour = preview ?? savedColour
+
+  useEffect(() => {
+    const input = inputRef.current
+    if (!input) return
+    const commit = (): void => {
+      void onChangeColour(registry, input.value).finally(() => setPreview(null))
+    }
+    input.addEventListener('change', commit)
+    return () => input.removeEventListener('change', commit)
+  }, [registry, onChangeColour])
+
+  return (
+    <>
+      <button
+        type="button"
+        className="dot-button"
+        aria-label={`Change colour for ${name}`}
+        onClick={() => inputRef.current?.click()}
+      >
+        <span className="dot" style={{ background: colour }} aria-hidden="true" />
+      </button>
+      <input
+        ref={inputRef}
+        className="sr-only"
+        type="color"
+        tabIndex={-1}
+        aria-hidden="true"
+        aria-label={`Colour for ${name}`}
+        value={colour}
+        onChange={(e) => setPreview(e.target.value)}
+      />
+    </>
+  )
+}
+
 interface RegistryRowProps {
   registry: RegistryRecord
   registryBusy: boolean
   onStartEdit: (registry: RegistryRecord) => void
   onToggleEnabled: (registry: RegistryRecord) => void
   onToggleAutoUpdate: (registry: RegistryRecord) => void
+  onChangeColour: (registry: RegistryRecord, colour: string) => Promise<void>
   onSyncRegistry: (registry: RegistryRecord) => void
   onRemoveRegistry: (registry: RegistryRecord) => void
 }
@@ -88,6 +141,7 @@ function RegistryRow({
   onStartEdit,
   onToggleEnabled,
   onToggleAutoUpdate,
+  onChangeColour,
   onSyncRegistry,
   onRemoveRegistry,
 }: RegistryRowProps): JSX.Element {
@@ -100,7 +154,11 @@ function RegistryRow({
     <li className={registry.enabled ? 'registry-item' : 'registry-item off'}>
       <div className="registry-info">
         <div className="registry-name">
-          <RegistryDot registry={registry} />
+          {registry.enabled ? (
+            <RegistryColourPicker registry={registry} name={name} onChangeColour={onChangeColour} />
+          ) : (
+            <RegistryDot registry={registry} />
+          )}
           <span className="registry-label">{name}</span>
         </div>
         <div className="registry-url mono">{registry.url}</div>
@@ -334,6 +392,7 @@ export function SettingsView({
   addForm,
   onToggleEnabled,
   onToggleAutoUpdate,
+  onChangeColour,
   onSyncRegistry,
   onRemoveRegistry,
 }: SettingsViewProps): JSX.Element {
@@ -371,6 +430,7 @@ export function SettingsView({
                   onStartEdit={editForm.onStart}
                   onToggleEnabled={onToggleEnabled}
                   onToggleAutoUpdate={onToggleAutoUpdate}
+                  onChangeColour={onChangeColour}
                   onSyncRegistry={onSyncRegistry}
                   onRemoveRegistry={onRemoveRegistry}
                 />
