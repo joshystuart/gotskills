@@ -1,4 +1,4 @@
-import type { JSX } from 'react'
+import { useState, type JSX, type MouseEvent } from 'react'
 import type { RegistryRecord, SyncStatus } from '../../shared/ipc'
 import logoUrl from './assets/logo.svg'
 import {
@@ -21,6 +21,7 @@ interface SidebarProps {
   registryCounts: Map<string, number>
   registryFilter: RegistryFilter
   onSelectRegistry: (registryId: string) => void
+  onRegistryMenu: (registry: RegistryRecord, position?: { x: number; y: number }) => Promise<void>
   onSelectView: (view: CatalogueView) => void
   onOpenSettings: () => void
 }
@@ -52,10 +53,24 @@ export function Sidebar({
   registryCounts,
   registryFilter,
   onSelectRegistry,
+  onRegistryMenu,
   onSelectView,
   onOpenSettings,
 }: SidebarProps): JSX.Element {
   const label = status ? syncLabel(status) : { glyph: '↻', text: 'Loading…' }
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+
+  async function openRegistryMenu(event: MouseEvent<HTMLButtonElement>, registry: RegistryRecord) {
+    event.preventDefault()
+    const fromKeyboard = event.clientX === 0 && event.clientY === 0
+    const rect = event.currentTarget.getBoundingClientRect()
+    setMenuOpenId(registry.id)
+    try {
+      await onRegistryMenu(registry, fromKeyboard ? { x: rect.left, y: rect.bottom } : undefined)
+    } finally {
+      setMenuOpenId(null)
+    }
+  }
 
   return (
     <aside className="sidebar" aria-label="Sidebar">
@@ -96,9 +111,16 @@ export function Sidebar({
             <button
               key={registry.id}
               type="button"
-              className={registry.enabled ? 'nav-item' : 'nav-item nav-item-off'}
+              className={[
+                'nav-item',
+                registry.enabled ? null : 'nav-item-off',
+                menuOpenId === registry.id ? 'menu-open' : null,
+              ]
+                .filter(Boolean)
+                .join(' ')}
               aria-pressed={registryFilter === registry.id}
               onClick={() => onSelectRegistry(registry.id)}
+              onContextMenu={(event) => void openRegistryMenu(event, registry)}
             >
               <span className="nav-label">
                 <span

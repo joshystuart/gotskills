@@ -6,6 +6,7 @@ import type {
   InstallResult,
   InstallTargetId,
   InstallTargetStatus,
+  RegistryMenuAction,
   RegistryRecord,
   RendererApi,
   SkillSummary,
@@ -92,6 +93,7 @@ export function App({ api }: AppProps): JSX.Element {
   const [acknowledgedStale, setAcknowledgedStale] = useState(false)
   const [pendingRemoval, setPendingRemoval] = useState<InstallTargetId[] | null>(null)
   const [pendingRegistryRemoval, setPendingRegistryRemoval] = useState<RegistryRecord | null>(null)
+  const [highlightedRegistryId, setHighlightedRegistryId] = useState<string | null>(null)
   const [fileViewerOpen, setFileViewerOpen] = useState(false)
   const [updateAllPhase, setUpdateAllPhase] = useState<UpdateAllPhase>({ kind: 'idle' })
   /**
@@ -279,6 +281,36 @@ export function App({ api }: AppProps): JSX.Element {
   function toggleRegistry(registryId: string): void {
     setRegistryFilter((current) => (current === registryId ? 'all' : registryId))
     setSettingsOpen(false)
+  }
+
+  useEffect(() => {
+    if (!highlightedRegistryId) return
+    const timer = setTimeout(() => setHighlightedRegistryId(null), 2000)
+    return () => clearTimeout(timer)
+  }, [highlightedRegistryId])
+
+  function showRegistryInSettings(registry: RegistryRecord): void {
+    openSettings()
+    setHighlightedRegistryId(registry.id)
+  }
+
+  async function onRegistryMenu(
+    registry: RegistryRecord,
+    position?: { x: number; y: number }
+  ): Promise<void> {
+    const action = await api.showRegistryMenu({
+      registryId: registry.id,
+      busy,
+      ...(position ? { position } : {}),
+    })
+    const run: Record<RegistryMenuAction, (registry: RegistryRecord) => unknown> = {
+      sync: onSyncRegistry,
+      'toggle-enabled': onToggleEnabled,
+      'toggle-auto-update': onToggleAutoUpdate,
+      'show-settings': showRegistryInSettings,
+      remove: setPendingRegistryRemoval,
+    }
+    if (action) await run[action](registry)
   }
 
   /** Re-pull registries + catalogue after any Registry mutation. */
@@ -696,6 +728,7 @@ export function App({ api }: AppProps): JSX.Element {
         registryCounts={registryCounts}
         registryFilter={registryFilter}
         onSelectRegistry={toggleRegistry}
+        onRegistryMenu={onRegistryMenu}
         onSelectView={selectView}
         onOpenSettings={openSettings}
       />
@@ -737,6 +770,7 @@ export function App({ api }: AppProps): JSX.Element {
             agents={agents}
             registryBusy={registryBusy}
             registryError={registryError}
+            highlightedRegistryId={highlightedRegistryId}
             editForm={{
               editingId,
               url: editUrl,

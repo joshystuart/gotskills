@@ -38,6 +38,7 @@ interface SettingsViewProps {
   appUpdateSettings: JSX.Element
   registryBusy: boolean
   registryError: string | null
+  highlightedRegistryId: string | null
   editForm: RegistryEditForm
   addForm: AddRegistryForm
   onToggleEnabled: (registry: RegistryRecord) => void
@@ -127,6 +128,7 @@ function RegistryColourPicker({
 interface RegistryRowProps {
   registry: RegistryRecord
   registryBusy: boolean
+  highlighted: boolean
   onStartEdit: (registry: RegistryRecord) => void
   onToggleEnabled: (registry: RegistryRecord) => void
   onToggleAutoUpdate: (registry: RegistryRecord) => void
@@ -138,6 +140,7 @@ interface RegistryRowProps {
 function RegistryRow({
   registry,
   registryBusy,
+  highlighted,
   onStartEdit,
   onToggleEnabled,
   onToggleAutoUpdate,
@@ -149,9 +152,23 @@ function RegistryRow({
   const syncState = rowSyncState(registry)
   const accessRequired = isAccessRequired(registry)
   const skillCount = registry.syncStatus.visibleSkillCount
+  const rowRef = useRef<HTMLLIElement>(null)
+
+  useEffect(() => {
+    if (highlighted) rowRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [highlighted])
 
   return (
-    <li className={registry.enabled ? 'registry-item' : 'registry-item off'}>
+    <li
+      ref={rowRef}
+      className={[
+        'registry-item',
+        registry.enabled ? null : 'off',
+        highlighted ? 'highlighted' : null,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <div className="registry-info">
         <div className="registry-name">
           {registry.enabled ? (
@@ -388,6 +405,7 @@ export function SettingsView({
   appUpdateSettings,
   registryBusy,
   registryError,
+  highlightedRegistryId,
   editForm,
   addForm,
   onToggleEnabled,
@@ -427,6 +445,7 @@ export function SettingsView({
                   key={registry.id}
                   registry={registry}
                   registryBusy={registryBusy}
+                  highlighted={highlightedRegistryId === registry.id}
                   onStartEdit={editForm.onStart}
                   onToggleEnabled={onToggleEnabled}
                   onToggleAutoUpdate={onToggleAutoUpdate}

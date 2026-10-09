@@ -10,6 +10,7 @@ import {
   type InstallRequest,
   type InstallResult,
   type InstallTargetStatus,
+  type RegistryMenuAction,
   type RegistryRecord,
   type RegistrySyncStatus,
   type RendererApi,
@@ -138,6 +139,7 @@ function fakeApi(
     syncRegistry: vi.fn().mockResolvedValue(DEFAULT_REGISTRY_RECORD.syncStatus),
     listSkillFiles: vi.fn().mockResolvedValue({ files: [] }),
     readSkillFile: vi.fn().mockResolvedValue({ path: '', sizeBytes: 0, kind: 'missing' }),
+    showRegistryMenu: vi.fn().mockResolvedValue(null),
     checkAppUpdate: vi.fn().mockResolvedValue(undefined),
     getAutoDownloadAppUpdates: vi.fn().mockResolvedValue(true),
     setAutoDownloadAppUpdates: vi.fn().mockResolvedValue(undefined),
@@ -4688,5 +4690,122 @@ describe('Catalogue multi-selection', () => {
       expect(await within(bar()).findByRole('button', { name: 'Install (1)' })).toBeInTheDocument()
       expect(selectionCount()).toHaveTextContent('3 selected · 2 skipped')
     })
+  })
+})
+
+describe('Sidebar registry menu', () => {
+  function menuApi(action: RegistryMenuAction | null, registry = DEFAULT_REGISTRY_RECORD) {
+    return fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([registry]),
+      showRegistryMenu: vi.fn().mockResolvedValue(action),
+    })
+  }
+
+  async function openMenu(init: MouseEventInit = { clientX: 40, clientY: 50 }): Promise<void> {
+    await act(async () => {
+      fireEvent.contextMenu(registryButton('anthropics/skills'), init)
+    })
+  }
+
+  it('opens the menu for that registry without changing the filter or the toolbar', async () => {
+    const api = menuApi(null)
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const title = screen.getByRole('heading', { level: 1 }).textContent
+
+    const event = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 40,
+      clientY: 50,
+    })
+    await act(async () => {
+      registryButton('anthropics/skills').dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(api.showRegistryMenu).toHaveBeenCalledWith({ registryId: 'default', busy: false })
+    expect(registryButton('anthropics/skills')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title)
+  })
+
+  it('opens the menu at the button when the keyboard menu key opens it', async () => {
+    const api = menuApi(null)
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const button = registryButton('anthropics/skills')
+    button.getBoundingClientRect = () =>
+      ({ left: 10, top: 20, bottom: 44, right: 200, width: 190, height: 24 }) as DOMRect
+
+    await openMenu({ clientX: 0, clientY: 0 })
+
+    expect(api.showRegistryMenu).toHaveBeenCalledWith({
+      registryId: 'default',
+      busy: false,
+      position: { x: 10, y: 44 },
+    })
+  })
+
+  it('outlines the row while its menu is open', async () => {
+    let close: (action: RegistryMenuAction | null) => void = () => {}
+    const api = fakeApi(syncStatus(), [], {
+      showRegistryMenu: vi.fn(() => new Promise<RegistryMenuAction | null>((r) => (close = r))),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+
+    await openMenu()
+    expect(registryButton('anthropics/skills')).toHaveClass('menu-open')
+    await act(async () => close(null))
+    expect(registryButton('anthropics/skills')).not.toHaveClass('menu-open')
+  })
+
+  it('toggles Enabled through the registry update and refreshes registries', async () => {
+    const api = menuApi('toggle-enabled')
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openMenu()
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', enabled: false })
+    expect(api.listRegistries).toHaveBeenCalledTimes(2)
+  })
+
+  it('toggles Auto Update through the registry update', async () => {
+    const api = menuApi('toggle-auto-update')
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openMenu()
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', autoUpdate: true })
+  })
+
+  it('syncs the registry', async () => {
+    const api = menuApi('sync')
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openMenu()
+    expect(api.syncRegistry).toHaveBeenCalledWith('default')
+  })
+
+  it('asks to confirm Remove with the existing dialog', async () => {
+    const api = menuApi('remove')
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openMenu()
+    expect(screen.getByRole('alertdialog', { name: 'Remove registry?' })).toBeInTheDocument()
+    expect(api.removeRegistry).not.toHaveBeenCalled()
+  })
+
+  it('shows the registry in Settings, highlighted and scrolled into view, without the edit form', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    const api = menuApi('show-settings')
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openMenu()
+
+    const settings = await screen.findByRole('main', { name: 'Settings' })
+    const row = within(settings).getByText('https://github.com/anthropics/skills').closest('li')
+    expect(row).toHaveClass('highlighted')
+    expect(scrollIntoView).toHaveBeenCalled()
+    expect(within(settings).queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
   })
 })
