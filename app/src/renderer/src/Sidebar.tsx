@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent, type MouseEvent } from 'react'
-import type { RegistryRecord, SyncStatus } from '../../shared/ipc'
+import { MAX_REGISTRY_NAME_LENGTH, type RegistryRecord, type SyncStatus } from '../../shared/ipc'
 import logoUrl from './assets/logo.svg'
 import {
   CATALOGUE_VIEWS,
   formatLastSynced,
-  automaticRegistryRecordLabel,
+  automaticRegistryRecordName,
   registryDotColour,
   registryRecordLabel,
   syncLabel,
@@ -12,6 +12,12 @@ import {
   type CatalogueView,
   type RegistryFilter,
 } from './cataloguePresentation'
+
+/** Tooltip for a sidebar Registry button: the friendly name, if set, before the automatic name. */
+function registryButtonTitle(registry: RegistryRecord): string {
+  const automatic = automaticRegistryRecordName(registry)
+  return registry.name ? `${registry.name} — ${automatic}` : automatic
+}
 
 interface SidebarProps {
   status: SyncStatus | null
@@ -98,7 +104,7 @@ function RegistryRenameField({
           ref={inputRef}
           className="nav-rename-input"
           aria-label="Registry name"
-          maxLength={40}
+          maxLength={MAX_REGISTRY_NAME_LENGTH}
           value={value}
           autoFocus
           onChange={(event) => setValue(event.target.value)}
@@ -219,7 +225,7 @@ export function Sidebar({
                   .filter(Boolean)
                   .join(' ')}
                 aria-pressed={registryFilter === registry.id}
-                title={automaticRegistryRecordLabel(registry)}
+                title={registryButtonTitle(registry)}
                 onClick={() => onSelectRegistry(registry.id)}
                 onContextMenu={(event) => void openRegistryMenu(event, registry)}
               >

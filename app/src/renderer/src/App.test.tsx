@@ -2628,7 +2628,10 @@ describe('Registry Name', () => {
     render(<App api={api} />)
     await screen.findByText('Alpha')
 
-    expect(registryButton('Team skills')).toHaveAttribute('title', 'anthropics/skills')
+    expect(registryButton('Team skills')).toHaveAttribute(
+      'title',
+      'Team skills — anthropics/skills'
+    )
     expect(
       within(screen.getByRole('listitem')).getByRole('img', { name: 'Team skills' })
     ).toBeInTheDocument()
@@ -4807,6 +4810,40 @@ describe('Sidebar registry menu', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title)
   })
 
+  it('does not mark the menu busy while a skill install is running', async () => {
+    const skills = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        latestVersion: 'abc1234',
+        perTarget: [{ target: '~/.claude/skills', state: 'not-installed' }],
+      }),
+    ]
+    const api = fakeApi(
+      syncStatus({ lastSyncedAt: new Date().toISOString(), registries: [reg()] }),
+      skills,
+      {
+        install: vi.fn(() => new Promise<InstallResult>(() => {})),
+        detectTargets: vi.fn().mockResolvedValue(detection([CLAUDE_CODE_TARGET])),
+      }
+    )
+    render(<App api={api} />)
+    await screen.findByText('Alpha')
+    await act(async () => {
+      screen.getByText('Alpha').click()
+    })
+    const installButton = await screen.findByRole('button', { name: 'Install to all' })
+    await act(async () => {
+      installButton.click()
+    })
+    expect(api.install).toHaveBeenCalled()
+
+    await openMenu()
+
+    expect(api.showRegistryMenu).toHaveBeenCalledWith({ registryId: 'default', busy: false })
+  })
+
   it('opens the menu at the button when the keyboard menu key opens it', async () => {
     const api = menuApi(null)
     render(<App api={api} />)
@@ -4938,7 +4975,10 @@ describe('Inline registry rename', () => {
 
     expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', name: 'Team skills' })
     expect(screen.queryByRole('textbox', { name: 'Registry name' })).not.toBeInTheDocument()
-    expect(registryButton('Team skills')).toHaveAttribute('title', 'anthropics/skills')
+    expect(registryButton('Team skills')).toHaveAttribute(
+      'title',
+      'Team skills — anthropics/skills'
+    )
   })
 
   it('saves on blur', async () => {

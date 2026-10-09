@@ -9,7 +9,7 @@ import {
   ACCESS_REQUIRED_GUIDANCE,
   ACCESS_REQUIRED_TITLE,
   registryDotColour,
-  automaticRegistryRecordLabel,
+  automaticRegistryRecordName,
   registryRecordLabel,
   registryStatusLabel,
 } from './cataloguePresentation'
@@ -277,7 +277,7 @@ function RegistryEditRow({ registry, registryBusy, form }: RegistryEditRowProps)
               className="field-input"
               type="text"
               value={form.name}
-              placeholder={automaticRegistryRecordLabel(registry)}
+              placeholder={automaticRegistryRecordName(registry)}
               maxLength={MAX_REGISTRY_NAME_LENGTH}
               onChange={(e) => form.onNameChange(e.target.value)}
               autoComplete="off"

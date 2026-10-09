@@ -303,7 +303,7 @@ export function App({ api }: AppProps): JSX.Element {
   ): Promise<void> {
     const action = await api.showRegistryMenu({
       registryId: registry.id,
-      busy,
+      busy: registryBusy || status?.phase === 'syncing',
       ...(position ? { position } : {}),
     })
     const run: Record<RegistryMenuAction, (registry: RegistryRecord) => unknown> = {

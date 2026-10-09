@@ -234,11 +234,11 @@ export function registryLabel(registry: {
   url: string
   name?: string | null
 }): string {
-  return registry.name ?? automaticRegistryLabel(registry)
+  return registry.name ?? automaticRegistryName(registry)
 }
 
 /** Automatic name for a Registry: `owner/repo` for GitHub, else host/path. */
-export function automaticRegistryLabel(registry: {
+export function automaticRegistryName(registry: {
   githubOwner: string | null
   githubRepo: string | null
   url: string
