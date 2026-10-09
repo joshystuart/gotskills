@@ -1,9 +1,10 @@
-import type { JSX } from 'react'
-import type { RegistryRecord, SyncStatus } from '../../shared/ipc'
+import { useEffect, useRef, useState, type JSX, type KeyboardEvent, type MouseEvent } from 'react'
+import { MAX_REGISTRY_NAME_LENGTH, type RegistryRecord, type SyncStatus } from '../../shared/ipc'
 import logoUrl from './assets/logo.svg'
 import {
   CATALOGUE_VIEWS,
   formatLastSynced,
+  automaticRegistryRecordName,
   registryDotColour,
   registryRecordLabel,
   syncLabel,
@@ -11,6 +12,12 @@ import {
   type CatalogueView,
   type RegistryFilter,
 } from './cataloguePresentation'
+
+/** Tooltip for a sidebar Registry button: the friendly name, if set, before the automatic name. */
+function registryButtonTitle(registry: RegistryRecord): string {
+  const automatic = automaticRegistryRecordName(registry)
+  return registry.name ? `${registry.name} — ${automatic}` : automatic
+}
 
 interface SidebarProps {
   status: SyncStatus | null
@@ -21,8 +28,97 @@ interface SidebarProps {
   registryCounts: Map<string, number>
   registryFilter: RegistryFilter
   onSelectRegistry: (registryId: string) => void
+  onRegistryMenu: (registry: RegistryRecord, position?: { x: number; y: number }) => Promise<void>
+  renamingRegistryId: string | null
+  onRenameRegistry: (registry: RegistryRecord, name: string) => Promise<void>
+  onCancelRename: () => void
   onSelectView: (view: CatalogueView) => void
   onOpenSettings: () => void
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/** In-place text input that renames a registry, Finder style. */
+function RegistryRenameField({
+  registry,
+  onRename,
+  onCancel,
+}: {
+  registry: RegistryRecord
+  onRename: (registry: RegistryRecord, name: string) => Promise<void>
+  onCancel: () => void
+}): JSX.Element {
+  const original = registryRecordLabel(registry)
+  const [value, setValue] = useState(original)
+  const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const settled = useRef(false)
+
+  useEffect(() => {
+    inputRef.current?.select()
+  }, [])
+
+  async function save(): Promise<void> {
+    if (settled.current) return
+    const name = value.trim()
+    if (name === original) {
+      settled.current = true
+      onCancel()
+      return
+    }
+    settled.current = true
+    try {
+      await onRename(registry, name)
+    } catch (err) {
+      settled.current = false
+      setError(errorText(err))
+    }
+  }
+
+  function cancel(): void {
+    settled.current = true
+    onCancel()
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      void save()
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      cancel()
+    }
+  }
+
+  return (
+    <div className="nav-item nav-rename">
+      <span className="nav-label">
+        <span
+          className="dot"
+          style={{ background: registryDotColour(registry) }}
+          aria-hidden="true"
+        />
+        <input
+          ref={inputRef}
+          className="nav-rename-input"
+          aria-label="Registry name"
+          maxLength={MAX_REGISTRY_NAME_LENGTH}
+          value={value}
+          autoFocus
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={() => void save()}
+        />
+      </span>
+      {error ? (
+        <span className="nav-rename-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  )
 }
 
 function RegistryHealth({
@@ -52,10 +148,27 @@ export function Sidebar({
   registryCounts,
   registryFilter,
   onSelectRegistry,
+  onRegistryMenu,
+  renamingRegistryId,
+  onRenameRegistry,
+  onCancelRename,
   onSelectView,
   onOpenSettings,
 }: SidebarProps): JSX.Element {
   const label = status ? syncLabel(status) : { glyph: '↻', text: 'Loading…' }
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+
+  async function openRegistryMenu(event: MouseEvent<HTMLButtonElement>, registry: RegistryRecord) {
+    event.preventDefault()
+    const fromKeyboard = event.clientX === 0 && event.clientY === 0
+    const rect = event.currentTarget.getBoundingClientRect()
+    setMenuOpenId(registry.id)
+    try {
+      await onRegistryMenu(registry, fromKeyboard ? { x: rect.left, y: rect.bottom } : undefined)
+    } finally {
+      setMenuOpenId(null)
+    }
+  }
 
   return (
     <aside className="sidebar" aria-label="Sidebar">
@@ -92,25 +205,42 @@ export function Sidebar({
           <h2 id="sidebar-registries-label" className="section-label">
             Registries
           </h2>
-          {registries.map((registry) => (
-            <button
-              key={registry.id}
-              type="button"
-              className={registry.enabled ? 'nav-item' : 'nav-item nav-item-off'}
-              aria-pressed={registryFilter === registry.id}
-              onClick={() => onSelectRegistry(registry.id)}
-            >
-              <span className="nav-label">
-                <span
-                  className="dot"
-                  style={{ background: registryDotColour(registry) }}
-                  aria-hidden="true"
-                />
-                <span>{registryRecordLabel(registry)}</span>
-              </span>{' '}
-              <RegistryHealth registry={registry} count={registryCounts.get(registry.id) ?? 0} />
-            </button>
-          ))}
+          {registries.map((registry) =>
+            renamingRegistryId === registry.id ? (
+              <RegistryRenameField
+                key={registry.id}
+                registry={registry}
+                onRename={onRenameRegistry}
+                onCancel={onCancelRename}
+              />
+            ) : (
+              <button
+                key={registry.id}
+                type="button"
+                className={[
+                  'nav-item',
+                  registry.enabled ? null : 'nav-item-off',
+                  menuOpenId === registry.id ? 'menu-open' : null,
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                aria-pressed={registryFilter === registry.id}
+                title={registryButtonTitle(registry)}
+                onClick={() => onSelectRegistry(registry.id)}
+                onContextMenu={(event) => void openRegistryMenu(event, registry)}
+              >
+                <span className="nav-label">
+                  <span
+                    className="dot"
+                    style={{ background: registryDotColour(registry) }}
+                    aria-hidden="true"
+                  />
+                  <span>{registryRecordLabel(registry)}</span>
+                </span>{' '}
+                <RegistryHealth registry={registry} count={registryCounts.get(registry.id) ?? 0} />
+              </button>
+            )
+          )}
         </nav>
       ) : null}
 

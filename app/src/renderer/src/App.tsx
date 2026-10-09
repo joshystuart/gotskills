@@ -6,6 +6,7 @@ import type {
   InstallResult,
   InstallTargetId,
   InstallTargetStatus,
+  RegistryMenuAction,
   RegistryRecord,
   RendererApi,
   SkillSummary,
@@ -29,6 +30,7 @@ import {
   deriveUpdateWork,
   filterByRegistry,
   isInstalledLike,
+  registryDotColour,
   registryRecordLabel,
   searchSkills,
   skillsInView,
@@ -80,6 +82,7 @@ export function App({ api }: AppProps): JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editUrl, setEditUrl] = useState('')
   const [editBranch, setEditBranch] = useState('')
+  const [editName, setEditName] = useState('')
   const [branchWarn, setBranchWarn] = useState(false)
   const [registryBusy, setRegistryBusy] = useState(false)
   const [registryError, setRegistryError] = useState<string | null>(null)
@@ -91,6 +94,7 @@ export function App({ api }: AppProps): JSX.Element {
   const [acknowledgedStale, setAcknowledgedStale] = useState(false)
   const [pendingRemoval, setPendingRemoval] = useState<InstallTargetId[] | null>(null)
   const [pendingRegistryRemoval, setPendingRegistryRemoval] = useState<RegistryRecord | null>(null)
+  const [highlightedRegistryId, setHighlightedRegistryId] = useState<string | null>(null)
   const [fileViewerOpen, setFileViewerOpen] = useState(false)
   const [updateAllPhase, setUpdateAllPhase] = useState<UpdateAllPhase>({ kind: 'idle' })
   /**
@@ -280,6 +284,45 @@ export function App({ api }: AppProps): JSX.Element {
     setSettingsOpen(false)
   }
 
+  useEffect(() => {
+    if (!highlightedRegistryId) return
+    const timer = setTimeout(() => setHighlightedRegistryId(null), 2000)
+    return () => clearTimeout(timer)
+  }, [highlightedRegistryId])
+
+  function showRegistryInSettings(registry: RegistryRecord): void {
+    openSettings()
+    setHighlightedRegistryId(registry.id)
+  }
+
+  const [renamingRegistryId, setRenamingRegistryId] = useState<string | null>(null)
+
+  async function onRegistryMenu(
+    registry: RegistryRecord,
+    position?: { x: number; y: number }
+  ): Promise<void> {
+    const action = await api.showRegistryMenu({
+      registryId: registry.id,
+      busy: registryBusy || status?.phase === 'syncing',
+      ...(position ? { position } : {}),
+    })
+    const run: Record<RegistryMenuAction, (registry: RegistryRecord) => unknown> = {
+      rename: (r) => setRenamingRegistryId(r.id),
+      sync: onSyncRegistry,
+      'toggle-enabled': onToggleEnabled,
+      'toggle-auto-update': onToggleAutoUpdate,
+      'show-settings': showRegistryInSettings,
+      remove: setPendingRegistryRemoval,
+    }
+    if (action) await run[action](registry)
+  }
+
+  async function onRenameRegistry(registry: RegistryRecord, name: string): Promise<void> {
+    await api.updateRegistry({ id: registry.id, name })
+    setRenamingRegistryId(null)
+    await refreshAfterRegistryChange()
+  }
+
   /** Re-pull registries + catalogue after any Registry mutation. */
   async function refreshAfterRegistryChange(): Promise<void> {
     const [list, snapshot] = await Promise.all([api.listRegistries(), api.getCatalogue()])
@@ -316,6 +359,7 @@ export function App({ api }: AppProps): JSX.Element {
     setEditingId(registry.id)
     setEditUrl(registry.url)
     setEditBranch(registry.branch)
+    setEditName(registry.name ?? '')
     setBranchWarn(false)
     setRegistryError(null)
   }
@@ -333,6 +377,7 @@ export function App({ api }: AppProps): JSX.Element {
         id: registry.id,
         url: editUrl.trim(),
         branch: editBranch.trim(),
+        name: editName.trim(),
       })
       setEditingId(null)
       setBranchWarn(false)
@@ -695,6 +740,10 @@ export function App({ api }: AppProps): JSX.Element {
         registryCounts={registryCounts}
         registryFilter={registryFilter}
         onSelectRegistry={toggleRegistry}
+        onRegistryMenu={onRegistryMenu}
+        renamingRegistryId={renamingRegistryId}
+        onRenameRegistry={onRenameRegistry}
+        onCancelRename={() => setRenamingRegistryId(null)}
         onSelectView={selectView}
         onOpenSettings={openSettings}
       />
@@ -704,6 +753,9 @@ export function App({ api }: AppProps): JSX.Element {
           title={settingsOpen ? 'Settings' : viewLabel(view)}
           subtitle={
             settingsOpen || !selectedRegistry ? null : registryRecordLabel(selectedRegistry)
+          }
+          subtitleColour={
+            settingsOpen || !selectedRegistry ? null : registryDotColour(selectedRegistry)
           }
           settingsOpen={settingsOpen}
           searchQuery={searchQuery}
@@ -733,13 +785,16 @@ export function App({ api }: AppProps): JSX.Element {
             agents={agents}
             registryBusy={registryBusy}
             registryError={registryError}
+            highlightedRegistryId={highlightedRegistryId}
             editForm={{
               editingId,
               url: editUrl,
               branch: editBranch,
+              name: editName,
               branchWarn,
               onUrlChange: setEditUrl,
               onBranchChange: setEditBranch,
+              onNameChange: setEditName,
               onStart: startEdit,
               onCancel: cancelEdit,
               onAttempt: attemptEdit,

@@ -3,6 +3,7 @@ import type { JSX, RefObject } from 'react'
 interface ToolbarProps {
   title: string
   subtitle: string | null
+  subtitleColour: string | null
   settingsOpen: boolean
   searchQuery: string
   searchRef: RefObject<HTMLInputElement | null>
@@ -14,6 +15,7 @@ interface ToolbarProps {
 export function Toolbar({
   title,
   subtitle,
+  subtitleColour,
   settingsOpen,
   searchQuery,
   searchRef,
@@ -28,7 +30,12 @@ export function Toolbar({
         {subtitle ? (
           <>
             {' · '}
-            <span className="toolbar-subtitle">{subtitle}</span>
+            {subtitleColour ? (
+              <span className="dot" style={{ background: subtitleColour }} aria-hidden="true" />
+            ) : null}
+            <span className="toolbar-subtitle" title={subtitle}>
+              {subtitle}
+            </span>
           </>
         ) : null}
       </h1>

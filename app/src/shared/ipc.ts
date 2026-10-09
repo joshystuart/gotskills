@@ -117,6 +117,8 @@ export interface RegistryRecord {
   githubRepo: string | null
   /** Chosen Registry Colour as lowercase `#rrggbb`; null means the automatic colour. */
   colour: string | null
+  /** Friendly Registry Name; null means the automatic name. */
+  name: string | null
   syncStatus: RegistrySyncStatus
 }
 
@@ -135,7 +137,12 @@ export interface UpdateRegistryRequest {
   autoUpdate?: boolean
   /** A `#rrggbb` hex colour; stored lowercase. */
   colour?: string
+  /** Friendly Registry Name, trimmed; an empty string clears it. */
+  name?: string
 }
+
+/** Longest Registry Name allowed, after trimming. */
+export const MAX_REGISTRY_NAME_LENGTH = 40
 
 /** @deprecated Prefer RegistryRecord; retained only while callers migrate. */
 export interface RegistryConfig {
@@ -343,10 +350,27 @@ export interface AppUpdateApi {
   restartForAppUpdate(): Promise<void>
 }
 
+/** An action from the sidebar registry menu that the renderer runs itself. */
+export type RegistryMenuAction =
+  'rename' | 'sync' | 'toggle-enabled' | 'toggle-auto-update' | 'show-settings' | 'remove'
+
+export interface RegistryMenuRequest {
+  registryId: string
+  /** True while registry work is in progress; disables the changing items. */
+  busy: boolean
+  /** Where to open the menu, in window coordinates; omitted to open at the pointer. */
+  position?: { x: number; y: number }
+}
+
+export interface RegistryMenuApi {
+  /** Show the native registry menu; resolves to the renderer action chosen, or null. */
+  showRegistryMenu(req: RegistryMenuRequest): Promise<RegistryMenuAction | null>
+}
+
 export type Unsubscribe = () => void
 
 /** What the renderer actually receives on window.api: requests + event subscriptions. */
-export interface RendererApi extends AppApi, AppUpdateApi {
+export interface RendererApi extends AppApi, AppUpdateApi, RegistryMenuApi {
   onAppUpdateState(cb: (state: AppUpdateState) => void): Unsubscribe
   onSyncStatus(cb: (status: SyncStatus) => void): Unsubscribe
   onCatalogueUpdated(cb: () => void): Unsubscribe
@@ -375,6 +399,7 @@ export const IpcRequest = {
   syncRegistry: 'api:syncRegistry',
   listSkillFiles: 'api:listSkillFiles',
   readSkillFile: 'api:readSkillFile',
+  showRegistryMenu: 'registryMenu:show',
 } as const
 
 export const IpcEvent = {

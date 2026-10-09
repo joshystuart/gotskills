@@ -33,6 +33,7 @@ const api: RendererApi = {
   syncRegistry: (id) => ipcRenderer.invoke(IpcRequest.syncRegistry, id),
   listSkillFiles: (req) => ipcRenderer.invoke(IpcRequest.listSkillFiles, req),
   readSkillFile: (req) => ipcRenderer.invoke(IpcRequest.readSkillFile, req),
+  showRegistryMenu: (req) => ipcRenderer.invoke(IpcRequest.showRegistryMenu, req),
   onSyncStatus: (cb) => subscribe(IpcEvent.syncStatus, (p) => cb(p as never)),
   onCatalogueUpdated: (cb) => subscribe(IpcEvent.catalogueUpdated, () => cb()),
   onAutoUpdateResult: (cb) => subscribe(IpcEvent.autoUpdateResult, (p) => cb(p as never)),

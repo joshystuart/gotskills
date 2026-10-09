@@ -26,6 +26,7 @@ import {
   type UninstallRequest,
   type UninstallResult,
   type UpdateRegistryRequest,
+  MAX_REGISTRY_NAME_LENGTH,
 } from '../shared/ipc'
 import { canonicalizeRegistryUrl } from '../shared/registryUrl'
 import { DEFAULT_REGISTRY } from './config'
@@ -261,6 +262,7 @@ export function createBackend(options: BackendOptions): Backend {
       githubOwner: registry.githubOwner,
       githubRepo: registry.githubRepo,
       colour: registry.colour,
+      name: registry.name,
       syncStatus: registryStatus(registry.id),
     }
   }
@@ -715,6 +717,14 @@ export function createBackend(options: BackendOptions): Backend {
           throw new Error(`"${req.colour}" is not a #rrggbb colour.`)
         }
         fields.colour = req.colour.toLowerCase()
+      }
+
+      if (req.name !== undefined) {
+        const name = req.name.trim()
+        if (name.length > MAX_REGISTRY_NAME_LENGTH) {
+          throw new Error(`A registry name can be at most ${MAX_REGISTRY_NAME_LENGTH} characters.`)
+        }
+        fields.name = name === '' ? null : name
       }
 
       const updated = updateRegistry(db, req.id, fields)

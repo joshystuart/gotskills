@@ -19,6 +19,8 @@ export interface StoredRegistry {
   canonicalKey: string
   /** Chosen Registry Colour as lowercase `#rrggbb`; null means the automatic colour. */
   colour: string | null
+  /** Friendly Registry Name; null means the automatic name. */
+  name: string | null
   /** ISO-8601 when soft-removed; null while active. */
   removedAt: string | null
   createdAt: string
@@ -44,6 +46,7 @@ interface RegistryRow {
   github_repo: string | null
   canonical_key: string
   colour: string | null
+  name: string | null
   removed_at: string | null
   created_at: string
   updated_at: string
@@ -68,6 +71,7 @@ function toStored(row: RegistryRow): StoredRegistry {
     githubRepo: row.github_repo,
     canonicalKey: row.canonical_key,
     colour: row.colour,
+    name: row.name,
     removedAt: row.removed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -163,6 +167,8 @@ export interface UpdateRegistryFields {
   githubRepo?: string | null
   canonicalKey?: string
   colour?: string
+  /** Null clears the friendly name. */
+  name?: string | null
 }
 
 export function updateRegistry(
@@ -182,13 +188,14 @@ export function updateRegistry(
     githubRepo: fields.githubRepo !== undefined ? fields.githubRepo : current.githubRepo,
     canonicalKey: fields.canonicalKey ?? current.canonicalKey,
     colour: fields.colour ?? current.colour,
+    name: fields.name !== undefined ? fields.name : current.name,
     updatedAt: new Date().toISOString(),
   }
   db.prepare(
     `UPDATE registry SET
        url = @url, branch = @branch, enabled = @enabled, auto_update = @auto_update,
        github_owner = @github_owner, github_repo = @github_repo,
-       canonical_key = @canonical_key, colour = @colour, updated_at = @updated_at
+       canonical_key = @canonical_key, colour = @colour, name = @name, updated_at = @updated_at
      WHERE id = @id`
   ).run({
     id,
@@ -200,6 +207,7 @@ export function updateRegistry(
     github_repo: next.githubRepo,
     canonical_key: next.canonicalKey,
     colour: next.colour,
+    name: next.name,
     updated_at: next.updatedAt,
   })
   return next
@@ -219,8 +227,18 @@ export function hardDeleteRegistry(db: DatabaseSync, id: string): void {
   db.prepare(`DELETE FROM registry WHERE id = ?`).run(id)
 }
 
-/** Display label for a Registry: `owner/repo` for GitHub, else host/path. */
+/** Registry Name: the friendly name when set, else the automatic name. */
 export function registryLabel(registry: {
+  githubOwner: string | null
+  githubRepo: string | null
+  url: string
+  name?: string | null
+}): string {
+  return registry.name ?? automaticRegistryName(registry)
+}
+
+/** Automatic name for a Registry: `owner/repo` for GitHub, else host/path. */
+export function automaticRegistryName(registry: {
   githubOwner: string | null
   githubRepo: string | null
   url: string

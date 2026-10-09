@@ -1,10 +1,11 @@
 import { autoUpdater } from 'electron-updater'
 import { createAppUpdate } from './appUpdate'
 import { registerAppUpdateIpc } from './appUpdateIpc'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { registerIpc } from './ipc'
+import { createRegistryMenu, registerRegistryMenuIpc } from './registryMenu'
 import { createBackend } from './backend'
 import { isGitAvailable } from './mirror/git'
 import { IpcEvent } from '../shared/ipc'
@@ -101,6 +102,11 @@ app.whenReady().then(async () => {
   })
   registerAppUpdateIpc(ipcMain, appUpdate)
   registerIpc(ipcMain, backend)
+  registerRegistryMenuIpc(
+    ipcMain,
+    createRegistryMenu({ Menu, clipboard, shell, listRegistries: backend.listRegistries }),
+    () => win
+  )
 
   win = createWindow()
 

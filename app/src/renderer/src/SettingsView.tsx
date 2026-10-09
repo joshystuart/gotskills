@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, JSX } from 'react'
-import type { RegistryRecord, SupportedAgent } from '../../shared/ipc'
+import {
+  MAX_REGISTRY_NAME_LENGTH,
+  type RegistryRecord,
+  type SupportedAgent,
+} from '../../shared/ipc'
 import {
   ACCESS_REQUIRED_GUIDANCE,
   ACCESS_REQUIRED_TITLE,
   registryDotColour,
+  automaticRegistryRecordName,
   registryRecordLabel,
   registryStatusLabel,
 } from './cataloguePresentation'
@@ -13,9 +18,11 @@ interface RegistryEditForm {
   editingId: string | null
   url: string
   branch: string
+  name: string
   branchWarn: boolean
   onUrlChange: (url: string) => void
   onBranchChange: (branch: string) => void
+  onNameChange: (name: string) => void
   onStart: (registry: RegistryRecord) => void
   onCancel: () => void
   onAttempt: (event: FormEvent, registry: RegistryRecord) => void
@@ -38,6 +45,7 @@ interface SettingsViewProps {
   appUpdateSettings: JSX.Element
   registryBusy: boolean
   registryError: string | null
+  highlightedRegistryId: string | null
   editForm: RegistryEditForm
   addForm: AddRegistryForm
   onToggleEnabled: (registry: RegistryRecord) => void
@@ -127,6 +135,7 @@ function RegistryColourPicker({
 interface RegistryRowProps {
   registry: RegistryRecord
   registryBusy: boolean
+  highlighted: boolean
   onStartEdit: (registry: RegistryRecord) => void
   onToggleEnabled: (registry: RegistryRecord) => void
   onToggleAutoUpdate: (registry: RegistryRecord) => void
@@ -138,6 +147,7 @@ interface RegistryRowProps {
 function RegistryRow({
   registry,
   registryBusy,
+  highlighted,
   onStartEdit,
   onToggleEnabled,
   onToggleAutoUpdate,
@@ -149,9 +159,23 @@ function RegistryRow({
   const syncState = rowSyncState(registry)
   const accessRequired = isAccessRequired(registry)
   const skillCount = registry.syncStatus.visibleSkillCount
+  const rowRef = useRef<HTMLLIElement>(null)
+
+  useEffect(() => {
+    if (highlighted) rowRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [highlighted])
 
   return (
-    <li className={registry.enabled ? 'registry-item' : 'registry-item off'}>
+    <li
+      ref={rowRef}
+      className={[
+        'registry-item',
+        registry.enabled ? null : 'off',
+        highlighted ? 'highlighted' : null,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <div className="registry-info">
         <div className="registry-name">
           {registry.enabled ? (
@@ -247,6 +271,18 @@ function RegistryEditRow({ registry, registryBusy, form }: RegistryEditRowProps)
         onSubmit={(e) => form.onAttempt(e, registry)}
       >
         <div className="fields">
+          <label className="field field-wide">
+            <span className="field-label">Name</span>
+            <input
+              className="field-input field-input-text"
+              type="text"
+              value={form.name}
+              placeholder={automaticRegistryRecordName(registry)}
+              maxLength={MAX_REGISTRY_NAME_LENGTH}
+              onChange={(e) => form.onNameChange(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
           <label className="field">
             <span className="field-label">Registry URL</span>
             <input
@@ -388,6 +424,7 @@ export function SettingsView({
   appUpdateSettings,
   registryBusy,
   registryError,
+  highlightedRegistryId,
   editForm,
   addForm,
   onToggleEnabled,
@@ -427,6 +464,7 @@ export function SettingsView({
                   key={registry.id}
                   registry={registry}
                   registryBusy={registryBusy}
+                  highlighted={highlightedRegistryId === registry.id}
                   onStartEdit={editForm.onStart}
                   onToggleEnabled={onToggleEnabled}
                   onToggleAutoUpdate={onToggleAutoUpdate}

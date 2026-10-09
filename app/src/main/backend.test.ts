@@ -34,6 +34,22 @@ function makeRemote(skillIds: string[]): string {
   return remote
 }
 
+function openBackend(userData: string, home: string): Backend {
+  return createBackend({
+    paths: { userData },
+    syncIntervalMs: 0,
+    homeDir: home,
+    ...fakeHomeDetection(home),
+  })
+}
+
+function freshBackend(dirs: string[]): { backend: Backend; userData: string; home: string } {
+  const userData = mkdtempSync(join(tmpdir(), 'igs-backend-'))
+  const home = mkdtempSync(join(tmpdir(), 'igs-home-'))
+  dirs.push(userData, home)
+  return { backend: openBackend(userData, home), userData, home }
+}
+
 describe('backend (AppApi seam)', () => {
   const dirs: string[] = []
 
@@ -269,40 +285,22 @@ describe('backend (AppApi seam)', () => {
   })
 
   describe('Registry Colour', () => {
-    async function freshBackend(): Promise<{ backend: Backend; userData: string; home: string }> {
-      const userData = mkdtempSync(join(tmpdir(), 'igs-backend-'))
-      const home = mkdtempSync(join(tmpdir(), 'igs-home-'))
-      dirs.push(userData, home)
-      const backend = createBackend({
-        paths: { userData },
-        syncIntervalMs: 0,
-        homeDir: home,
-        ...fakeHomeDetection(home),
-      })
-      return { backend, userData, home }
-    }
-
     it('comes back as null for a Registry nobody has coloured', async () => {
-      const { backend } = await freshBackend()
+      const { backend } = await freshBackend(dirs)
       const [seeded] = await backend.listRegistries()
       expect(seeded.colour).toBeNull()
       backend.close()
     })
 
     it('stores a chosen colour as lowercase hex and keeps it across relaunch', async () => {
-      const { backend, userData, home } = await freshBackend()
+      const { backend, userData, home } = await freshBackend(dirs)
       const [seeded] = await backend.listRegistries()
 
       const updated = await backend.updateRegistry({ id: seeded.id, colour: '#AABBCC' })
       expect(updated.colour).toBe('#aabbcc')
       backend.close()
 
-      const relaunched = createBackend({
-        paths: { userData },
-        syncIntervalMs: 0,
-        homeDir: home,
-        ...fakeHomeDetection(home),
-      })
+      const relaunched = openBackend(userData, home)
       const [reloaded] = await relaunched.listRegistries()
       expect(reloaded.colour).toBe('#aabbcc')
       relaunched.close()
@@ -311,7 +309,7 @@ describe('backend (AppApi seam)', () => {
     it.each(['red', '#fff', 'url(x)'])(
       'rejects %s and leaves the stored colour unchanged',
       async (colour) => {
-        const { backend } = await freshBackend()
+        const { backend } = await freshBackend(dirs)
         const [seeded] = await backend.listRegistries()
         await backend.updateRegistry({ id: seeded.id, colour: '#123456' })
 
@@ -324,13 +322,79 @@ describe('backend (AppApi seam)', () => {
     )
 
     it('keeps the colour when other fields change', async () => {
-      const { backend } = await freshBackend()
+      const { backend } = await freshBackend(dirs)
       const [seeded] = await backend.listRegistries()
       await backend.updateRegistry({ id: seeded.id, colour: '#123456' })
 
       const updated = await backend.updateRegistry({ id: seeded.id, enabled: false })
 
       expect(updated.colour).toBe('#123456')
+      backend.close()
+    })
+  })
+  describe('Registry Name', () => {
+    it('comes back as null for a Registry nobody has named', async () => {
+      const { backend } = await freshBackend(dirs)
+      const [seeded] = await backend.listRegistries()
+      expect(seeded.name).toBeNull()
+      backend.close()
+    })
+
+    it('stores a trimmed name and keeps it across relaunch', async () => {
+      const { backend, userData, home } = await freshBackend(dirs)
+      const [seeded] = await backend.listRegistries()
+
+      const updated = await backend.updateRegistry({ id: seeded.id, name: '  Team skills  ' })
+      expect(updated.name).toBe('Team skills')
+      backend.close()
+
+      const relaunched = openBackend(userData, home)
+      const [reloaded] = await relaunched.listRegistries()
+      expect(reloaded.name).toBe('Team skills')
+      relaunched.close()
+    })
+
+    it.each(['', '   '])('clears the name when given %j', async (name) => {
+      const { backend } = await freshBackend(dirs)
+      const [seeded] = await backend.listRegistries()
+      await backend.updateRegistry({ id: seeded.id, name: 'Team skills' })
+
+      const updated = await backend.updateRegistry({ id: seeded.id, name })
+
+      expect(updated.name).toBeNull()
+      backend.close()
+    })
+
+    it('rejects a 41-character name and leaves the stored name unchanged', async () => {
+      const { backend } = await freshBackend(dirs)
+      const [seeded] = await backend.listRegistries()
+      await backend.updateRegistry({ id: seeded.id, name: 'Team skills' })
+
+      await expect(
+        backend.updateRegistry({ id: seeded.id, name: 'x'.repeat(41) })
+      ).rejects.toThrow()
+
+      const [after] = await backend.listRegistries()
+      expect(after.name).toBe('Team skills')
+      backend.close()
+    })
+
+    it('accepts a 40-character name', async () => {
+      const { backend } = await freshBackend(dirs)
+      const [seeded] = await backend.listRegistries()
+      const updated = await backend.updateRegistry({ id: seeded.id, name: 'x'.repeat(40) })
+      expect(updated.name).toBe('x'.repeat(40))
+      backend.close()
+    })
+
+    it('keeps the name when other fields change', async () => {
+      const { backend } = await freshBackend(dirs)
+      const [seeded] = await backend.listRegistries()
+      await backend.updateRegistry({ id: seeded.id, name: 'Team skills' })
+
+      const updated = await backend.updateRegistry({ id: seeded.id, enabled: false })
+
+      expect(updated.name).toBe('Team skills')
       backend.close()
     })
   })

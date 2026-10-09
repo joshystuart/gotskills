@@ -10,6 +10,7 @@ import {
   type InstallRequest,
   type InstallResult,
   type InstallTargetStatus,
+  type RegistryMenuAction,
   type RegistryRecord,
   type RegistrySyncStatus,
   type RendererApi,
@@ -31,6 +32,7 @@ const DEFAULT_REGISTRY_RECORD: RegistryRecord = {
   githubOwner: 'anthropics',
   githubRepo: 'skills',
   colour: null,
+  name: null,
   syncStatus: { registryId: 'default', phase: 'synced', lastSyncedAt: null },
 }
 
@@ -138,6 +140,7 @@ function fakeApi(
     syncRegistry: vi.fn().mockResolvedValue(DEFAULT_REGISTRY_RECORD.syncStatus),
     listSkillFiles: vi.fn().mockResolvedValue({ files: [] }),
     readSkillFile: vi.fn().mockResolvedValue({ path: '', sizeBytes: 0, kind: 'missing' }),
+    showRegistryMenu: vi.fn().mockResolvedValue(null),
     checkAppUpdate: vi.fn().mockResolvedValue(undefined),
     getAutoDownloadAppUpdates: vi.fn().mockResolvedValue(true),
     setAutoDownloadAppUpdates: vi.fn().mockResolvedValue(undefined),
@@ -299,6 +302,7 @@ describe('App shell', () => {
       githubOwner: 'example-org',
       githubRepo: 'skills',
       colour: null,
+      name: null,
       syncStatus: { registryId: 'reg-2', phase: 'synced', lastSyncedAt: null },
     }
     const skills = [
@@ -453,6 +457,7 @@ describe('App shell', () => {
       id: 'default',
       url: 'https://github.com/example/trial-skills',
       branch: 'main',
+      name: '',
     })
   })
 
@@ -1339,6 +1344,47 @@ describe('Sidebar Registries', () => {
 
     fireEvent.click(registryButton('anthropics/skills'))
     expect(screen.getByRole('heading', { level: 1, name: 'Updates' })).toBeInTheDocument()
+  })
+
+  it('shows the selected Registry Colour dot before its name in the toolbar title', async () => {
+    render(
+      <App
+        api={fakeApi(syncStatus(), [], {
+          listRegistries: vi.fn().mockResolvedValue([registryRecord({ colour: '#aabbcc' })]),
+        })}
+      />
+    )
+    await screen.findByText('Synced')
+    const heading = screen.getByRole('heading', { level: 1 })
+    expect(heading.querySelector('.dot')).toBeNull()
+
+    fireEvent.click(registryButton('anthropics/skills'))
+    expect(heading.querySelector('.dot')).toHaveStyle({ background: '#aabbcc' })
+    expect(within(heading).getByText('anthropics/skills')).toHaveAttribute(
+      'title',
+      'anthropics/skills'
+    )
+
+    await openSettings()
+    expect(screen.getByRole('heading', { level: 1 }).querySelector('.dot')).toBeNull()
+  })
+
+  it('shows a grey toolbar dot for a disabled selected Registry', async () => {
+    render(
+      <App
+        api={fakeApi(syncStatus(), [], {
+          listRegistries: vi
+            .fn()
+            .mockResolvedValue([registryRecord({ enabled: false, colour: '#aabbcc' })]),
+        })}
+      />
+    )
+    await screen.findByRole('navigation', { name: 'Registries' })
+
+    fireEvent.click(registryButton('anthropics/skills'))
+    expect(screen.getByRole('heading', { level: 1 }).querySelector('.dot')).toHaveStyle({
+      background: '#5b5b64',
+    })
   })
 
   it('returns from Settings to the filtered view when a Registry is selected', async () => {
@@ -2523,6 +2569,7 @@ describe('Settings registry list', () => {
       id: 'default',
       url: DEFAULT_REGISTRY_RECORD.url,
       branch: 'next',
+      name: '',
     })
   })
 
@@ -2560,6 +2607,82 @@ describe('Settings registry list', () => {
     expect(api.updateRegistry).not.toHaveBeenCalled()
     expect(screen.queryByText(/update source/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Branch')).not.toBeInTheDocument()
+  })
+})
+
+describe('Registry Name', () => {
+  it('shows the friendly name in the sidebar, Settings and catalogue rows, with owner/repo on hover', async () => {
+    const skills = [
+      skill({
+        id: 'default/alpha',
+        registryId: 'default',
+        folderName: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        registryLabel: 'Team skills',
+      }),
+    ]
+    const api = fakeApi(syncStatus(), skills, {
+      listRegistries: vi.fn().mockResolvedValue([registryRecord({ name: 'Team skills' })]),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Alpha')
+
+    expect(registryButton('Team skills')).toHaveAttribute(
+      'title',
+      'Team skills — anthropics/skills'
+    )
+    expect(
+      within(screen.getByRole('option')).getByRole('img', { name: 'Team skills' })
+    ).toBeInTheDocument()
+
+    await openSettings()
+    expect(screen.getByRole('button', { name: 'Edit Team skills' })).toBeInTheDocument()
+  })
+
+  it('edits the name from the Settings edit form', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([registryRecord({ name: 'Team skills' })]),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    await act(async () => {
+      screen.getByRole('button', { name: 'Edit Team skills' }).click()
+    })
+
+    const field = screen.getByLabelText('Name')
+    expect(field).toHaveValue('Team skills')
+    expect(field).toHaveAttribute('placeholder', 'anthropics/skills')
+
+    fireEvent.change(field, { target: { value: 'Shared skills' } })
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save' }).click()
+    })
+    expect(api.updateRegistry).toHaveBeenCalledWith({
+      id: 'default',
+      url: DEFAULT_REGISTRY_RECORD.url,
+      branch: 'main',
+      name: 'Shared skills',
+    })
+  })
+
+  it('starts the Name field empty without a friendly name and sends an empty name to clear it', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([registryRecord()]),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    await act(async () => {
+      screen.getByRole('button', { name: 'Edit anthropics/skills' }).click()
+    })
+
+    expect(screen.getByLabelText('Name')).toHaveValue('')
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save' }).click()
+    })
+    expect(api.updateRegistry).toHaveBeenCalledWith(expect.objectContaining({ name: '' }))
   })
 })
 
@@ -2860,6 +2983,7 @@ describe('Update all', () => {
       githubOwner: 'example-org',
       githubRepo: 'skills',
       colour: null,
+      name: null,
       syncStatus: { registryId: 'reg-2', phase: 'synced', lastSyncedAt: null },
     }
     const skills = [
@@ -4647,5 +4771,301 @@ describe('Catalogue multi-selection', () => {
       expect(await within(bar()).findByRole('button', { name: 'Install (1)' })).toBeInTheDocument()
       expect(selectionCount()).toHaveTextContent('3 selected · 2 skipped')
     })
+  })
+})
+
+describe('Sidebar registry menu', () => {
+  function menuApi(action: RegistryMenuAction | null, registry = DEFAULT_REGISTRY_RECORD) {
+    return fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([registry]),
+      showRegistryMenu: vi.fn().mockResolvedValue(action),
+    })
+  }
+
+  async function openMenu(init: MouseEventInit = { clientX: 40, clientY: 50 }): Promise<void> {
+    await act(async () => {
+      fireEvent.contextMenu(registryButton('anthropics/skills'), init)
+    })
+  }
+
+  it('opens the menu for that registry without changing the filter or the toolbar', async () => {
+    const api = menuApi(null)
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const title = screen.getByRole('heading', { level: 1 }).textContent
+
+    const event = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 40,
+      clientY: 50,
+    })
+    await act(async () => {
+      registryButton('anthropics/skills').dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(api.showRegistryMenu).toHaveBeenCalledWith({ registryId: 'default', busy: false })
+    expect(registryButton('anthropics/skills')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title)
+  })
+
+  it('does not mark the menu busy while a skill install is running', async () => {
+    const skills = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        latestVersion: 'abc1234',
+        perTarget: [{ target: '~/.claude/skills', state: 'not-installed' }],
+      }),
+    ]
+    const api = fakeApi(
+      syncStatus({ lastSyncedAt: new Date().toISOString(), registries: [reg()] }),
+      skills,
+      {
+        install: vi.fn(() => new Promise<InstallResult>(() => {})),
+        detectTargets: vi.fn().mockResolvedValue(detection([CLAUDE_CODE_TARGET])),
+      }
+    )
+    render(<App api={api} />)
+    await screen.findByText('Alpha')
+    await act(async () => {
+      screen.getByText('Alpha').click()
+    })
+    const installButton = await screen.findByRole('button', { name: 'Install to all' })
+    await act(async () => {
+      installButton.click()
+    })
+    expect(api.install).toHaveBeenCalled()
+
+    await openMenu()
+
+    expect(api.showRegistryMenu).toHaveBeenCalledWith({ registryId: 'default', busy: false })
+  })
+
+  it('opens the menu at the button when the keyboard menu key opens it', async () => {
+    const api = menuApi(null)
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const button = registryButton('anthropics/skills')
+    button.getBoundingClientRect = () =>
+      ({ left: 10, top: 20, bottom: 44, right: 200, width: 190, height: 24 }) as DOMRect
+
+    await openMenu({ clientX: 0, clientY: 0 })
+
+    expect(api.showRegistryMenu).toHaveBeenCalledWith({
+      registryId: 'default',
+      busy: false,
+      position: { x: 10, y: 44 },
+    })
+  })
+
+  it('outlines the row while its menu is open', async () => {
+    let close: (action: RegistryMenuAction | null) => void = () => {}
+    const api = fakeApi(syncStatus(), [], {
+      showRegistryMenu: vi.fn(() => new Promise<RegistryMenuAction | null>((r) => (close = r))),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+
+    await openMenu()
+    expect(registryButton('anthropics/skills')).toHaveClass('menu-open')
+    await act(async () => close(null))
+    expect(registryButton('anthropics/skills')).not.toHaveClass('menu-open')
+  })
+
+  it('toggles Enabled through the registry update and refreshes registries', async () => {
+    const api = menuApi('toggle-enabled')
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openMenu()
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', enabled: false })
+    expect(api.listRegistries).toHaveBeenCalledTimes(2)
+  })
+
+  it('toggles Auto Update through the registry update', async () => {
+    const api = menuApi('toggle-auto-update')
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openMenu()
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', autoUpdate: true })
+  })
+
+  it('syncs the registry', async () => {
+    const api = menuApi('sync')
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openMenu()
+    expect(api.syncRegistry).toHaveBeenCalledWith('default')
+  })
+
+  it('asks to confirm Remove with the existing dialog', async () => {
+    const api = menuApi('remove')
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openMenu()
+    expect(screen.getByRole('alertdialog', { name: 'Remove registry?' })).toBeInTheDocument()
+    expect(api.removeRegistry).not.toHaveBeenCalled()
+  })
+
+  it('shows the registry in Settings, highlighted and scrolled into view, without the edit form', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    const api = menuApi('show-settings')
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openMenu()
+
+    const settings = await screen.findByRole('main', { name: 'Settings' })
+    const row = within(settings).getByText('https://github.com/anthropics/skills').closest('li')
+    expect(row).toHaveClass('highlighted')
+    expect(scrollIntoView).toHaveBeenCalled()
+    expect(within(settings).queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+  })
+})
+
+describe('Inline registry rename', () => {
+  function renameApi(registry = DEFAULT_REGISTRY_RECORD, overrides: Partial<RendererApi> = {}) {
+    return fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([registry]),
+      showRegistryMenu: vi.fn().mockResolvedValue('rename'),
+      ...overrides,
+    })
+  }
+
+  async function startRename(label = 'anthropics/skills'): Promise<HTMLInputElement> {
+    await act(async () => {
+      fireEvent.contextMenu(registryButton(label), { clientX: 40, clientY: 50 })
+    })
+    return screen.getByRole('textbox', { name: 'Registry name' }) as HTMLInputElement
+  }
+
+  it('shows the automatic name selected in a text input', async () => {
+    render(<App api={renameApi()} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    expect(input).toHaveValue('anthropics/skills')
+    expect(input).toHaveAttribute('maxLength', '40')
+    expect(input).toHaveFocus()
+    expect(input.selectionStart).toBe(0)
+    expect(input.selectionEnd).toBe('anthropics/skills'.length)
+  })
+
+  it('holds the friendly name when there is one', async () => {
+    render(<App api={renameApi(registryRecord({ name: 'Team skills' }))} />)
+    await screen.findByText('Synced')
+    expect(await startRename('Team skills')).toHaveValue('Team skills')
+  })
+
+  it('saves on Enter and shows the new name with the automatic name on hover', async () => {
+    const api = renameApi()
+    vi.mocked(api.listRegistries)
+      .mockResolvedValueOnce([DEFAULT_REGISTRY_RECORD])
+      .mockResolvedValue([registryRecord({ name: 'Team skills' })])
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    fireEvent.change(input, { target: { value: 'Team skills' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', name: 'Team skills' })
+    expect(screen.queryByRole('textbox', { name: 'Registry name' })).not.toBeInTheDocument()
+    expect(registryButton('Team skills')).toHaveAttribute(
+      'title',
+      'Team skills — anthropics/skills'
+    )
+  })
+
+  it('saves on blur', async () => {
+    const api = renameApi()
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    fireEvent.change(input, { target: { value: 'Team skills' } })
+    await act(async () => {
+      fireEvent.blur(input)
+    })
+
+    expect(api.updateRegistry).toHaveBeenCalledTimes(1)
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', name: 'Team skills' })
+  })
+
+  it('cancels on Esc without any call', async () => {
+    const api = renameApi()
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    fireEvent.change(input, { target: { value: 'Team skills' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape' })
+    })
+
+    expect(api.updateRegistry).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: 'Registry name' })).not.toBeInTheDocument()
+    expect(registryButton('anthropics/skills')).toBeInTheDocument()
+  })
+
+  it('makes no call when the name is unchanged', async () => {
+    const api = renameApi()
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+
+    expect(api.updateRegistry).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: 'Registry name' })).not.toBeInTheDocument()
+  })
+
+  it('sends an empty name when cleared and shows the automatic name again', async () => {
+    const api = renameApi(registryRecord({ name: 'Team skills' }))
+    vi.mocked(api.listRegistries)
+      .mockResolvedValueOnce([registryRecord({ name: 'Team skills' })])
+      .mockResolvedValue([DEFAULT_REGISTRY_RECORD])
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename('Team skills')
+
+    fireEvent.change(input, { target: { value: '' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', name: '' })
+    expect(registryButton('anthropics/skills')).toBeInTheDocument()
+  })
+
+  it('keeps the typed text and shows the error when the save fails, and Esc then restores the old name', async () => {
+    const api = renameApi(DEFAULT_REGISTRY_RECORD, {
+      updateRegistry: vi.fn().mockRejectedValue(new Error('Name is too long')),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    fireEvent.change(input, { target: { value: 'Team skills' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+
+    const open = screen.getByRole('textbox', { name: 'Registry name' })
+    expect(open).toHaveValue('Team skills')
+    expect(screen.getByRole('alert')).toHaveTextContent('Name is too long')
+
+    await act(async () => {
+      fireEvent.keyDown(open, { key: 'Escape' })
+    })
+    expect(screen.queryByRole('textbox', { name: 'Registry name' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(registryButton('anthropics/skills')).toBeInTheDocument()
   })
 })

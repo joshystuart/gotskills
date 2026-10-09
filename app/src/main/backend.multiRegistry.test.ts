@@ -78,6 +78,27 @@ describe('multi-registry sync isolation, aggregation, and lifecycle', () => {
     for (const r of await backend.listRegistries()) await backend.removeRegistry(r.id)
   }
 
+  it('labels catalogue skills with the Registry Name and lets two Registries share it', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'igs-mr-home-'))
+    dirs.push(home)
+    const { backend } = newBackend(home)
+    await withoutDefault(backend)
+    const first = await backend.addRegistry({ url: makeRemote(['alpha']), branch: 'main' })
+    const second = await backend.addRegistry({ url: makeRemote(['beta']), branch: 'main' })
+
+    await backend.updateRegistry({ id: first.id, name: 'Team skills' })
+    await backend.updateRegistry({ id: second.id, name: 'Team skills' })
+
+    const labels = (await backend.getCatalogue()).skills.map((skill) => skill.registryLabel)
+    expect(labels).toEqual(['Team skills', 'Team skills'])
+
+    await backend.updateRegistry({ id: first.id, name: '' })
+    const alpha = (await backend.getCatalogue()).skills.find((s) => s.folderName === 'alpha')
+    expect(alpha?.registryLabel).not.toBe('Team skills')
+    expect(alpha?.registryLabel).toContain('igs-mr-remote-')
+    backend.close()
+  })
+
   it('defaults seeded and newly added Registries to Auto Update off', async () => {
     const home = mkdtempSync(join(tmpdir(), 'igs-mr-home-'))
     dirs.push(home)
