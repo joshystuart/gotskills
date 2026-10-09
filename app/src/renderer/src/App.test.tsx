@@ -4506,11 +4506,11 @@ describe('Catalogue multi-selection', () => {
         refresh: vi.fn().mockResolvedValue({ registries: [] }),
       })
       selectAlphaToGamma()
-      expect(selectionCount()).toHaveTextContent('3 selected · 1 already installed')
+      expect(selectionCount()).toHaveTextContent('3 selected · 1 skipped')
       expect(within(bar()).getByRole('button', { name: 'Install (2)' })).toBeEnabled()
 
       fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Cursor' }))
-      expect(selectionCount()).toHaveTextContent('3 selected · 2 already installed')
+      expect(selectionCount()).toHaveTextContent('3 selected · 2 skipped')
       await act(async () => {
         within(bar()).getByRole('button', { name: 'Install (1)' }).click()
       })
@@ -4525,6 +4525,23 @@ describe('Catalogue multi-selection', () => {
       ])
       expect(api.repair).not.toHaveBeenCalled()
       expect(api.refresh).not.toHaveBeenCalled()
+    })
+
+    it('counts a removed skill as skipped', async () => {
+      await renderList([
+        ...INSTALLABLE,
+        skill({
+          id: 'epsilon',
+          name: 'Epsilon',
+          description: 'e',
+          softDeleted: true,
+          perTarget: BOTH,
+        }),
+      ])
+      fireEvent.click(row('Delta'))
+      fireEvent.click(row('Epsilon'), { metaKey: true })
+      expect(selectionCount()).toHaveTextContent('2 selected · 1 skipped')
+      expect(within(bar()).getByRole('button', { name: 'Install (1)' })).toBeEnabled()
     })
 
     it('disables Install with no chip on', async () => {
@@ -4628,7 +4645,7 @@ describe('Catalogue multi-selection', () => {
         push?.()
       })
       expect(await within(bar()).findByRole('button', { name: 'Install (1)' })).toBeInTheDocument()
-      expect(selectionCount()).toHaveTextContent('3 selected · 2 already installed')
+      expect(selectionCount()).toHaveTextContent('3 selected · 2 skipped')
     })
   })
 })

@@ -102,7 +102,7 @@ function IdleBar({
     <>
       <div className="update-all-idle">
         <span className="update-all-count" role="status" aria-live="polite">
-          {count} selected · {work.skipped} already installed
+          {count} selected · {work.skipped} skipped
         </span>
         <div className="selection-chips">
           {targets.map((target) => (
