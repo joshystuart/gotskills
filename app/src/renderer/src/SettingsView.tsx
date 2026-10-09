@@ -271,10 +271,10 @@ function RegistryEditRow({ registry, registryBusy, form }: RegistryEditRowProps)
         onSubmit={(e) => form.onAttempt(e, registry)}
       >
         <div className="fields">
-          <label className="field">
+          <label className="field field-wide">
             <span className="field-label">Name</span>
             <input
-              className="field-input"
+              className="field-input field-input-text"
               type="text"
               value={form.name}
               placeholder={automaticRegistryRecordName(registry)}

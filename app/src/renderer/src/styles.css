@@ -1307,6 +1307,11 @@ button:disabled {
   gap: 6px;
 }
 
+.field-wide {
+  grid-column: 1 / -1;
+  max-width: 360px;
+}
+
 .field-label {
   color: var(--muted);
   font-size: 12px;
@@ -1321,6 +1326,11 @@ button:disabled {
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 12.5px;
+}
+
+.field-input-text {
+  font-family: inherit;
+  font-size: 13px;
 }
 
 .field-input:focus-visible {
