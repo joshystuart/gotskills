@@ -4887,3 +4887,145 @@ describe('Sidebar registry menu', () => {
     expect(within(settings).queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
   })
 })
+
+describe('Inline registry rename', () => {
+  function renameApi(registry = DEFAULT_REGISTRY_RECORD, overrides: Partial<RendererApi> = {}) {
+    return fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([registry]),
+      showRegistryMenu: vi.fn().mockResolvedValue('rename'),
+      ...overrides,
+    })
+  }
+
+  async function startRename(label = 'anthropics/skills'): Promise<HTMLInputElement> {
+    await act(async () => {
+      fireEvent.contextMenu(registryButton(label), { clientX: 40, clientY: 50 })
+    })
+    return screen.getByRole('textbox', { name: 'Registry name' }) as HTMLInputElement
+  }
+
+  it('shows the automatic name selected in a text input', async () => {
+    render(<App api={renameApi()} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    expect(input).toHaveValue('anthropics/skills')
+    expect(input).toHaveAttribute('maxLength', '40')
+    expect(input).toHaveFocus()
+    expect(input.selectionStart).toBe(0)
+    expect(input.selectionEnd).toBe('anthropics/skills'.length)
+  })
+
+  it('holds the friendly name when there is one', async () => {
+    render(<App api={renameApi(registryRecord({ name: 'Team skills' }))} />)
+    await screen.findByText('Synced')
+    expect(await startRename('Team skills')).toHaveValue('Team skills')
+  })
+
+  it('saves on Enter and shows the new name with the automatic name on hover', async () => {
+    const api = renameApi()
+    vi.mocked(api.listRegistries)
+      .mockResolvedValueOnce([DEFAULT_REGISTRY_RECORD])
+      .mockResolvedValue([registryRecord({ name: 'Team skills' })])
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    fireEvent.change(input, { target: { value: 'Team skills' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', name: 'Team skills' })
+    expect(screen.queryByRole('textbox', { name: 'Registry name' })).not.toBeInTheDocument()
+    expect(registryButton('Team skills')).toHaveAttribute('title', 'anthropics/skills')
+  })
+
+  it('saves on blur', async () => {
+    const api = renameApi()
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    fireEvent.change(input, { target: { value: 'Team skills' } })
+    await act(async () => {
+      fireEvent.blur(input)
+    })
+
+    expect(api.updateRegistry).toHaveBeenCalledTimes(1)
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', name: 'Team skills' })
+  })
+
+  it('cancels on Esc without any call', async () => {
+    const api = renameApi()
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    fireEvent.change(input, { target: { value: 'Team skills' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape' })
+    })
+
+    expect(api.updateRegistry).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: 'Registry name' })).not.toBeInTheDocument()
+    expect(registryButton('anthropics/skills')).toBeInTheDocument()
+  })
+
+  it('makes no call when the name is unchanged', async () => {
+    const api = renameApi()
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+
+    expect(api.updateRegistry).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: 'Registry name' })).not.toBeInTheDocument()
+  })
+
+  it('sends an empty name when cleared and shows the automatic name again', async () => {
+    const api = renameApi(registryRecord({ name: 'Team skills' }))
+    vi.mocked(api.listRegistries)
+      .mockResolvedValueOnce([registryRecord({ name: 'Team skills' })])
+      .mockResolvedValue([DEFAULT_REGISTRY_RECORD])
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename('Team skills')
+
+    fireEvent.change(input, { target: { value: '' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', name: '' })
+    expect(registryButton('anthropics/skills')).toBeInTheDocument()
+  })
+
+  it('keeps the typed text and shows the error when the save fails, and Esc then restores the old name', async () => {
+    const api = renameApi(DEFAULT_REGISTRY_RECORD, {
+      updateRegistry: vi.fn().mockRejectedValue(new Error('Name is too long')),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    const input = await startRename()
+
+    fireEvent.change(input, { target: { value: 'Team skills' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+
+    const open = screen.getByRole('textbox', { name: 'Registry name' })
+    expect(open).toHaveValue('Team skills')
+    expect(screen.getByRole('alert')).toHaveTextContent('Name is too long')
+
+    await act(async () => {
+      fireEvent.keyDown(open, { key: 'Escape' })
+    })
+    expect(screen.queryByRole('textbox', { name: 'Registry name' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(registryButton('anthropics/skills')).toBeInTheDocument()
+  })
+})

@@ -352,7 +352,7 @@ export interface AppUpdateApi {
 
 /** An action from the sidebar registry menu that the renderer runs itself. */
 export type RegistryMenuAction =
-  'sync' | 'toggle-enabled' | 'toggle-auto-update' | 'show-settings' | 'remove'
+  'rename' | 'sync' | 'toggle-enabled' | 'toggle-auto-update' | 'show-settings' | 'remove'
 
 export interface RegistryMenuRequest {
   registryId: string

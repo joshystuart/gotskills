@@ -27,6 +27,8 @@ function summary(items: ReturnType<typeof registryMenuTemplate>) {
 describe('registry menu template', () => {
   it('lists every item in order for an enabled GitHub registry', () => {
     expect(summary(registryMenuTemplate(record(), false))).toEqual([
+      ['Rename…', 'rename', true, undefined],
+      '---',
       ['Sync Now', 'sync', true, undefined],
       '---',
       ['Enabled', 'toggle-enabled', true, true],
@@ -46,6 +48,8 @@ describe('registry menu template', () => {
       false
     )
     expect(summary(items).map((item) => item[0])).toEqual([
+      'Rename…',
+      '-',
       'Sync Now',
       '-',
       'Enabled',
@@ -62,6 +66,8 @@ describe('registry menu template', () => {
     expect(
       summary(registryMenuTemplate(record({ enabled: false, autoUpdate: false }), false))
     ).toEqual([
+      ['Rename…', 'rename', true, undefined],
+      '---',
       ['Sync Now', 'sync', false, undefined],
       '---',
       ['Enabled', 'toggle-enabled', true, false],
@@ -77,6 +83,8 @@ describe('registry menu template', () => {
 
   it('disables the changing items while busy and keeps the read-only ones enabled', () => {
     expect(summary(registryMenuTemplate(record(), true))).toEqual([
+      ['Rename…', 'rename', false, undefined],
+      '---',
       ['Sync Now', 'sync', false, undefined],
       '---',
       ['Enabled', 'toggle-enabled', false, true],

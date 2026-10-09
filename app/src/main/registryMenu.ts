@@ -25,6 +25,8 @@ const SEPARATOR: RegistryMenuItem = { type: 'separator' }
 export function registryMenuTemplate(registry: RegistryRecord, busy: boolean): RegistryMenuItem[] {
   const isGitHub = registry.githubOwner !== null && registry.githubRepo !== null
   return [
+    { type: 'normal', label: 'Rename…', action: 'rename', enabled: !busy },
+    SEPARATOR,
     { type: 'normal', label: 'Sync Now', action: 'sync', enabled: !busy && registry.enabled },
     SEPARATOR,
     {

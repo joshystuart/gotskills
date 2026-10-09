@@ -295,6 +295,8 @@ export function App({ api }: AppProps): JSX.Element {
     setHighlightedRegistryId(registry.id)
   }
 
+  const [renamingRegistryId, setRenamingRegistryId] = useState<string | null>(null)
+
   async function onRegistryMenu(
     registry: RegistryRecord,
     position?: { x: number; y: number }
@@ -305,6 +307,7 @@ export function App({ api }: AppProps): JSX.Element {
       ...(position ? { position } : {}),
     })
     const run: Record<RegistryMenuAction, (registry: RegistryRecord) => unknown> = {
+      rename: (r) => setRenamingRegistryId(r.id),
       sync: onSyncRegistry,
       'toggle-enabled': onToggleEnabled,
       'toggle-auto-update': onToggleAutoUpdate,
@@ -312,6 +315,12 @@ export function App({ api }: AppProps): JSX.Element {
       remove: setPendingRegistryRemoval,
     }
     if (action) await run[action](registry)
+  }
+
+  async function onRenameRegistry(registry: RegistryRecord, name: string): Promise<void> {
+    await api.updateRegistry({ id: registry.id, name })
+    setRenamingRegistryId(null)
+    await refreshAfterRegistryChange()
   }
 
   /** Re-pull registries + catalogue after any Registry mutation. */
@@ -732,6 +741,9 @@ export function App({ api }: AppProps): JSX.Element {
         registryFilter={registryFilter}
         onSelectRegistry={toggleRegistry}
         onRegistryMenu={onRegistryMenu}
+        renamingRegistryId={renamingRegistryId}
+        onRenameRegistry={onRenameRegistry}
+        onCancelRename={() => setRenamingRegistryId(null)}
         onSelectView={selectView}
         onOpenSettings={openSettings}
       />
