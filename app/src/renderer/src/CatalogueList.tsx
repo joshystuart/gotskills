@@ -1,14 +1,17 @@
 import type { JSX } from 'react'
 import type { InstallTargetStatus, RegistryRecord, SkillSummary } from '../../shared/ipc'
+import type { ClickModifiers } from './catalogueSelection'
 import { registryDotColour, rowAttention, targetsWithSkill } from './cataloguePresentation'
 
 interface CatalogueListProps {
   skills: SkillSummary[]
   targets: InstallTargetStatus[]
   selectedId: string | null
+  /** Rows in the multi-selection; when empty, the open row shows as selected. */
+  selectedIds: ReadonlySet<string>
   emptyMessage: string
   registriesById: Map<string, RegistryRecord>
-  onSelect: (skillId: string) => void
+  onRowClick: (skillId: string, modifiers: ClickModifiers) => void
 }
 
 function labelList(targets: InstallTargetStatus[]): string {
@@ -57,17 +60,25 @@ export function CatalogueList({
   skills,
   targets,
   selectedId,
+  selectedIds,
   emptyMessage,
   registriesById,
-  onSelect,
+  onRowClick,
 }: CatalogueListProps): JSX.Element {
+  const isSelected = (id: string): boolean =>
+    selectedIds.size > 0 ? selectedIds.has(id) : id === selectedId
   return (
     <>
       <div className="catalogue-head" aria-hidden="true">
         <span>Skill</span>
         <span>Installed</span>
       </div>
-      <div className="pane-body catalogue-list" role="list">
+      <div
+        className="pane-body catalogue-list"
+        role="listbox"
+        aria-label="Skills"
+        aria-multiselectable="true"
+      >
         {skills.length === 0 ? (
           <p className="empty">{emptyMessage}</p>
         ) : (
@@ -75,9 +86,12 @@ export function CatalogueList({
             <button
               key={skill.id}
               type="button"
-              role="listitem"
-              className={`skill-row${skill.id === selectedId ? ' selected' : ''}${skill.softDeleted ? ' soft-deleted' : ''}`}
-              onClick={() => onSelect(skill.id)}
+              role="option"
+              aria-selected={isSelected(skill.id)}
+              className={`skill-row${isSelected(skill.id) ? ' selected' : ''}${skill.softDeleted ? ' soft-deleted' : ''}`}
+              onClick={(event) =>
+                onRowClick(skill.id, { meta: event.metaKey, shift: event.shiftKey })
+              }
             >
               <span className="skill-cell">
                 <span className="skill-row-main">

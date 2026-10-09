@@ -36,6 +36,14 @@ import {
   type CatalogueView,
   type RegistryFilter,
 } from './cataloguePresentation'
+import {
+  EMPTY_SELECTION,
+  nextSelection,
+  pruneSelection,
+  type CatalogueSelection,
+  type ClickModifiers,
+} from './catalogueSelection'
+import { SelectionBar } from './SelectionBar'
 import { Toolbar } from './Toolbar'
 import { UpdateAllRegion, type UpdateAllPhase } from './UpdateAllRegion'
 
@@ -59,6 +67,7 @@ export function App({ api }: AppProps): JSX.Element {
   const [view, setView] = useState<CatalogueView>('all')
   const [registryFilter, setRegistryFilter] = useState<RegistryFilter>('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [selection, setSelection] = useState<CatalogueSelection>(EMPTY_SELECTION)
   const [refreshing, setRefreshing] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchFocusRequest, setSearchFocusRequest] = useState(0)
@@ -113,6 +122,12 @@ export function App({ api }: AppProps): JSX.Element {
     const [snapshot, detected] = await Promise.all([api.getCatalogue(), api.detectTargets()])
     if (!isCurrent()) return null
     setSkills(snapshot.skills)
+    setSelection((current) =>
+      pruneSelection(
+        current,
+        snapshot.skills.map((s) => s.id)
+      )
+    )
     setTargets(detected.targets)
     setAgents(detected.agents)
     return snapshot
@@ -231,6 +246,18 @@ export function App({ api }: AppProps): JSX.Element {
   }, [openSettings, confirmOpen])
 
   useEffect(() => {
+    setSelection(EMPTY_SELECTION)
+  }, [view, searchQuery, registryFilter])
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape' && !confirmOpen) setSelection(EMPTY_SELECTION)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [confirmOpen])
+
+  useEffect(() => {
     if (searchFocusRequest > 0) searchRef.current?.focus()
   }, [searchFocusRequest])
 
@@ -249,6 +276,12 @@ export function App({ api }: AppProps): JSX.Element {
     const [list, snapshot] = await Promise.all([api.listRegistries(), api.getCatalogue()])
     setRegistries(list)
     setSkills(snapshot.skills)
+    setSelection((current) =>
+      pruneSelection(
+        current,
+        snapshot.skills.map((s) => s.id)
+      )
+    )
     setStatus(snapshot.syncStatus)
   }
 
@@ -410,6 +443,23 @@ export function App({ api }: AppProps): JSX.Element {
   function revisionForRegistry(registryId: string): string | undefined {
     return statusRef.current?.registries.find((r) => r.registryId === registryId)?.revision
   }
+
+  function onRowClick(skillId: string, modifiers: ClickModifiers): void {
+    const multi = modifiers.meta || modifiers.shift
+    if (multi && runInFlight) return
+    setSelection((current) =>
+      nextSelection(
+        current,
+        visibleSkills.map((s) => s.id),
+        skillId,
+        modifiers,
+        selectedId
+      )
+    )
+    setSelectedId(skillId)
+  }
+
+  const showSelectionBar = selection.ids.size >= 2
 
   const updateAllWork = deriveUpdateWork(skills, status)
   const updateAllItems = updateAllWork.all
@@ -667,17 +717,24 @@ export function App({ api }: AppProps): JSX.Element {
           />
         ) : (
           <>
-            <UpdateAllRegion
-              items={updateAllItems}
-              phase={updateAllPhase}
-              disabled={busy}
-              onRunAll={() => void onRunUpdateAll()}
-              onCancel={cancelUpdateAll}
-              onDismissSummary={dismissUpdateAllSummary}
-              disclosures={updateAllWork.disclosures}
-              acknowledgeStale={runAcknowledgeStale}
-              onAcknowledgeStale={setRunAcknowledgeStale}
-            />
+            {showSelectionBar ? (
+              <SelectionBar
+                count={selection.ids.size}
+                onClear={() => setSelection(EMPTY_SELECTION)}
+              />
+            ) : (
+              <UpdateAllRegion
+                items={updateAllItems}
+                phase={updateAllPhase}
+                disabled={busy}
+                onRunAll={() => void onRunUpdateAll()}
+                onCancel={cancelUpdateAll}
+                onDismissSummary={dismissUpdateAllSummary}
+                disclosures={updateAllWork.disclosures}
+                acknowledgeStale={runAcknowledgeStale}
+                onAcknowledgeStale={setRunAcknowledgeStale}
+              />
+            )}
             {autoUpdateNotices.map((notice) => (
               <AutoUpdateNotice
                 key={notice.id}
@@ -693,9 +750,10 @@ export function App({ api }: AppProps): JSX.Element {
                   skills={visibleSkills}
                   targets={visibleTargets}
                   selectedId={selectedId}
+                  selectedIds={selection.ids}
                   emptyMessage={emptyMessage}
                   registriesById={registriesById}
-                  onSelect={setSelectedId}
+                  onRowClick={onRowClick}
                 />
               </section>
 

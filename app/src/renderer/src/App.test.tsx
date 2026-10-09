@@ -649,7 +649,7 @@ describe('App shell', () => {
     await screen.findByText('External skill')
     fireEvent.click(screen.getByText('External skill'))
 
-    expect(within(screen.getByRole('listitem')).getByText('—')).toBeInTheDocument()
+    expect(within(screen.getByRole('option')).getByText('—')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
     expect(uninstall).not.toHaveBeenCalled()
   })
@@ -697,7 +697,7 @@ describe('App shell', () => {
     )
     render(<App api={api} />)
     await screen.findByText('Alpha')
-    const row = screen.getByRole('listitem')
+    const row = screen.getByRole('option')
     expect(
       within(row).getByText('Installed in Claude Code. Removed in Claude Code')
     ).toBeInTheDocument()
@@ -1398,7 +1398,7 @@ describe('Catalogue table', () => {
       />
     )
     await screen.findByText('Alpha')
-    const row = screen.getByRole('listitem')
+    const row = screen.getByRole('option')
 
     expect(within(row).getByText('2')).toBeInTheDocument()
     expect(within(row).getByRole('tooltip', { hidden: true })).toHaveTextContent(
@@ -1434,7 +1434,7 @@ describe('Catalogue table', () => {
     ]
     render(<App api={fakeApi(syncStatus(), skills)} />)
     await screen.findByText('Alpha')
-    const [alpha, beta] = screen.getAllByRole('listitem')
+    const [alpha, beta] = screen.getAllByRole('option')
 
     expect(within(alpha).getByText('—')).toBeInTheDocument()
     expect(within(alpha).getByText('Not installed')).toBeInTheDocument()
@@ -1460,7 +1460,7 @@ describe('Catalogue table', () => {
     ]
     render(<App api={fakeApi(syncStatus(), skills)} />)
     await screen.findByText('Alpha')
-    const row = screen.getByRole('listitem')
+    const row = screen.getByRole('option')
 
     expect(within(row).getByText('2')).toBeInTheDocument()
     expect(within(row).getByText('Removed')).toBeInTheDocument()
@@ -1485,7 +1485,7 @@ describe('Catalogue table', () => {
     ]
     render(<App api={fakeApi(syncStatus(), skills)} />)
     await screen.findByText('Alpha')
-    const row = screen.getByRole('listitem')
+    const row = screen.getByRole('option')
 
     expect(within(row).getByText('1')).toBeInTheDocument()
     expect(within(row).getByText('Orphaned')).toBeInTheDocument()
@@ -1509,7 +1509,7 @@ describe('Catalogue table', () => {
     ]
     render(<App api={fakeApi(syncStatus(), skills)} />)
     await screen.findByText('Alpha')
-    const row = screen.getByRole('listitem')
+    const row = screen.getByRole('option')
 
     expect(within(row).getByText('Repair')).toBeInTheDocument()
     expect(within(row).queryByText('Update')).not.toBeInTheDocument()
@@ -1557,7 +1557,7 @@ describe('Catalogue table', () => {
     )
     await screen.findByText('Alpha')
 
-    const row = screen.getByRole('listitem')
+    const row = screen.getByRole('option')
     expect(within(row).getByText('1')).toBeInTheDocument()
     expect(within(row).getByRole('tooltip', { hidden: true })).toHaveTextContent(/^Claude Code$/)
 
@@ -1665,7 +1665,7 @@ describe('Catalogue table', () => {
     render(<App api={api} />)
     fireEvent.click(await screen.findByText('Alpha'))
 
-    expect(within(screen.getByRole('listitem')).getByText('—')).toBeInTheDocument()
+    expect(within(screen.getByRole('option')).getByText('—')).toBeInTheDocument()
     const onThisMac = await screen.findByRole('region', { name: 'On this Mac' })
     expect(within(onThisMac).getByText('Held by another registry')).toBeInTheDocument()
     expect(
@@ -1797,7 +1797,7 @@ describe('Catalogue table', () => {
     })
     render(<App api={api} />)
     fireEvent.click(await screen.findByText('Alpha'))
-    const row = screen.getByRole('listitem')
+    const row = screen.getByRole('option')
     expect(within(row).getByText('Installed in Goose')).toBeInTheDocument()
 
     await act(async () => {
@@ -1833,7 +1833,7 @@ describe('Catalogue table', () => {
     await screen.findByText('Alpha')
 
     expect(
-      within(screen.getByRole('listitem')).getByRole('tooltip', { hidden: true })
+      within(screen.getByRole('option')).getByRole('tooltip', { hidden: true })
     ).toHaveTextContent(/^Shared folder$/)
   })
 
@@ -1861,7 +1861,7 @@ describe('Catalogue table', () => {
     render(<App api={fakeApi(syncStatus(), skills)} />)
     await screen.findByText('Alpha')
 
-    expect(within(screen.getByRole('listitem')).getByText(shown)).toBeInTheDocument()
+    expect(within(screen.getByRole('option')).getByText(shown)).toBeInTheDocument()
   })
 
   it('treats a target with no reported state as not installed', async () => {
@@ -1876,7 +1876,7 @@ describe('Catalogue table', () => {
     render(<App api={fakeApi(syncStatus(), skills)} />)
     await screen.findByText('Alpha')
 
-    expect(within(screen.getByRole('listitem')).getByText('1')).toBeInTheDocument()
+    expect(within(screen.getByRole('option')).getByText('1')).toBeInTheDocument()
   })
 
   it('has no Revision column', async () => {
@@ -1887,7 +1887,7 @@ describe('Catalogue table', () => {
     await screen.findByText('Alpha')
 
     expect(screen.queryByText('Revision')).not.toBeInTheDocument()
-    expect(within(screen.getByRole('listitem')).queryByText('9f8e7d6')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('option')).queryByText('9f8e7d6')).not.toBeInTheDocument()
   })
 
   it('shows the Registry colour dot, named for the Registry, on each row', async () => {
@@ -1903,7 +1903,7 @@ describe('Catalogue table', () => {
     await screen.findByText('Alpha')
 
     expect(
-      within(screen.getByRole('listitem')).getByRole('img', { name: 'team/skills' })
+      within(screen.getByRole('option')).getByRole('img', { name: 'team/skills' })
     ).toBeInTheDocument()
   })
 
@@ -1924,7 +1924,7 @@ describe('Catalogue table', () => {
       background: '#aabbcc',
     })
     expect(
-      within(screen.getByRole('listitem')).getByRole('img', { name: 'anthropics/skills' })
+      within(screen.getByRole('option')).getByRole('img', { name: 'anthropics/skills' })
     ).toHaveStyle({ background: '#aabbcc' })
   })
 
@@ -2294,7 +2294,7 @@ describe('Settings registry list', () => {
     })
     fireEvent.click(viewButton('Catalogue'))
     expect(
-      within(await screen.findByRole('listitem')).getByRole('img', { name: 'anthropics/skills' })
+      within(await screen.findByRole('option')).getByRole('img', { name: 'anthropics/skills' })
     ).toHaveStyle({ background: '#445566' })
   })
 
@@ -2636,7 +2636,7 @@ describe('Catalogue provenance and conflict', () => {
     ]
     render(<App api={fakeApi(syncStatus(), skills)} />)
     await screen.findByText('Solo')
-    const rows = within(screen.getByRole('region', { name: 'Catalogue' })).getAllByRole('listitem')
+    const rows = within(screen.getByRole('region', { name: 'Catalogue' })).getAllByRole('option')
     const rowFor = (description: string): HTMLElement =>
       rows.find((row) => within(row).queryByText(description) !== null)!
     expect(within(rowFor('from one')).getByText('org/one')).toBeVisible()
@@ -4316,4 +4316,148 @@ it('waits for a skill install to finish before allowing App Update restart', asy
     })
   )
   expect(screen.getByRole('button', { name: 'Restart to update' })).toBeEnabled()
+})
+
+describe('Catalogue multi-selection', () => {
+  const FIVE = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon'].map((name) =>
+    skill({ id: name.toLowerCase(), name, description: `${name} skill` })
+  )
+  const BEHIND = skill({
+    id: 'zeta',
+    name: 'Zeta',
+    description: 'Behind',
+    perTarget: [{ target: '~/.claude/skills', state: 'update-available', installedVersion: 'z1' }],
+  })
+
+  function row(name: string): HTMLElement {
+    const match = screen
+      .getAllByRole('option')
+      .find((option) => within(option).queryByText(name, { selector: '.skill-name' }))
+    if (!match) throw new Error(`No row for ${name}`)
+    return match
+  }
+
+  function selectionCount(): HTMLElement {
+    return within(screen.getByRole('region', { name: 'Selection' })).getByRole('status')
+  }
+
+  async function renderList(skills: SkillSummary[] = FIVE, overrides: Partial<RendererApi> = {}) {
+    const api = fakeApi(syncStatus({ registries: [reg()] }), skills, overrides)
+    render(<App api={api} />)
+    await screen.findByText('Alpha')
+    return api
+  }
+
+  it('declares a multi-selectable list and shows no bar for zero or one selected', async () => {
+    await renderList()
+    expect(screen.getByRole('listbox', { name: 'Skills' })).toHaveAttribute(
+      'aria-multiselectable',
+      'true'
+    )
+    fireEvent.click(row('Alpha'), { metaKey: true })
+    expect(row('Alpha')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('region', { name: 'Selection' })).not.toBeInTheDocument()
+  })
+
+  it('⌘-click takes the open skill in first, shows the bar with the count, and hides Update all', async () => {
+    await renderList([...FIVE, BEHIND])
+    expect(screen.getByRole('region', { name: 'Update all' })).toBeInTheDocument()
+    fireEvent.click(row('Alpha'))
+    expect(await screen.findByRole('region', { name: 'Skill detail' })).toBeInTheDocument()
+    fireEvent.click(row('Gamma'), { metaKey: true })
+
+    const bar = screen.getByRole('region', { name: 'Selection' })
+    expect(within(bar).getByRole('status')).toHaveTextContent('2 selected')
+    expect(row('Alpha')).toHaveAttribute('aria-selected', 'true')
+    expect(row('Gamma')).toHaveAttribute('aria-selected', 'true')
+    expect(row('Beta')).toHaveAttribute('aria-selected', 'false')
+    expect(screen.queryByRole('region', { name: 'Update all' })).not.toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Skill detail' })).getByRole('heading', {
+        name: 'Gamma',
+      })
+    ).toBeInTheDocument()
+  })
+
+  it('⇧-click selects a range and ⌘⇧-click adds another', async () => {
+    await renderList()
+    fireEvent.click(row('Alpha'))
+    fireEvent.click(row('Gamma'), { shiftKey: true })
+    expect(selectionCount()).toHaveTextContent('3 selected')
+    fireEvent.click(row('Epsilon'), { metaKey: true })
+    fireEvent.click(row('Delta'), { metaKey: true, shiftKey: true })
+    expect(selectionCount()).toHaveTextContent('5 selected')
+  })
+
+  it('Clear, Esc, a plain click and a view change each clear the selection', async () => {
+    await renderList([...FIVE, BEHIND])
+    const select = (): void => {
+      fireEvent.click(row('Alpha'))
+      fireEvent.click(row('Beta'), { shiftKey: true })
+      expect(screen.getByRole('region', { name: 'Selection' })).toBeInTheDocument()
+    }
+
+    select()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(screen.queryByRole('region', { name: 'Selection' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Update all' })).toBeInTheDocument()
+
+    select()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('region', { name: 'Selection' })).not.toBeInTheDocument()
+
+    select()
+    fireEvent.click(row('Gamma'))
+    expect(screen.queryByRole('region', { name: 'Selection' })).not.toBeInTheDocument()
+
+    select()
+    fireEvent.click(viewButton('Installed'))
+    fireEvent.click(viewButton('Catalogue'))
+    expect(screen.queryByRole('region', { name: 'Selection' })).not.toBeInTheDocument()
+
+    select()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search skills' }), {
+      target: { value: 'a' },
+    })
+    expect(screen.queryByRole('region', { name: 'Selection' })).not.toBeInTheDocument()
+  })
+
+  it('a catalogue reload keeps listed skills and drops vanished ones', async () => {
+    let push: (() => void) | undefined
+    let current = FIVE
+    await renderList(FIVE, {
+      getCatalogue: vi.fn(() =>
+        Promise.resolve({ skills: current, syncStatus: syncStatus({ registries: [reg()] }) })
+      ),
+      onCatalogueUpdated: vi.fn((cb: () => void) => {
+        push = cb
+        return () => {}
+      }),
+    })
+    fireEvent.click(row('Alpha'))
+    fireEvent.click(row('Gamma'), { shiftKey: true })
+    expect(selectionCount()).toHaveTextContent('3 selected')
+
+    current = FIVE.filter((s) => s.id !== 'beta')
+    await act(async () => {
+      push?.()
+    })
+    await vi.waitFor(() => expect(screen.queryByText('Beta')).not.toBeInTheDocument())
+    expect(selectionCount()).toHaveTextContent('2 selected')
+  })
+
+  it('ignores ⌘ and ⇧ clicks while an Update all run is in flight', async () => {
+    const refresh = deferred<SyncAllResult>()
+    await renderList([...FIVE, BEHIND], { refresh: vi.fn().mockReturnValue(refresh.promise) })
+    fireEvent.click(screen.getByRole('button', { name: 'Update all (1)' }))
+    expect(await screen.findByText('Checking for updates…')).toBeInTheDocument()
+    fireEvent.click(row('Alpha'), { metaKey: true })
+    fireEvent.click(row('Gamma'), { shiftKey: true })
+    expect(row('Alpha')).toHaveAttribute('aria-selected', 'false')
+    expect(screen.queryByRole('region', { name: 'Selection' })).not.toBeInTheDocument()
+    await act(async () => {
+      refresh.resolve({ registries: [reg()] })
+      await refresh.promise
+    })
+  })
 })
