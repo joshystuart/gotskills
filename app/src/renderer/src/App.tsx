@@ -29,6 +29,7 @@ import {
   deriveUpdateWork,
   filterByRegistry,
   isInstalledLike,
+  registryDotColour,
   registryRecordLabel,
   searchSkills,
   skillsInView,
@@ -704,6 +705,9 @@ export function App({ api }: AppProps): JSX.Element {
           title={settingsOpen ? 'Settings' : viewLabel(view)}
           subtitle={
             settingsOpen || !selectedRegistry ? null : registryRecordLabel(selectedRegistry)
+          }
+          subtitleColour={
+            settingsOpen || !selectedRegistry ? null : registryDotColour(selectedRegistry)
           }
           settingsOpen={settingsOpen}
           searchQuery={searchQuery}

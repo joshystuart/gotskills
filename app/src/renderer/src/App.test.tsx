@@ -1341,6 +1341,47 @@ describe('Sidebar Registries', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Updates' })).toBeInTheDocument()
   })
 
+  it('shows the selected Registry Colour dot before its name in the toolbar title', async () => {
+    render(
+      <App
+        api={fakeApi(syncStatus(), [], {
+          listRegistries: vi.fn().mockResolvedValue([registryRecord({ colour: '#aabbcc' })]),
+        })}
+      />
+    )
+    await screen.findByText('Synced')
+    const heading = screen.getByRole('heading', { level: 1 })
+    expect(heading.querySelector('.dot')).toBeNull()
+
+    fireEvent.click(registryButton('anthropics/skills'))
+    expect(heading.querySelector('.dot')).toHaveStyle({ background: '#aabbcc' })
+    expect(within(heading).getByText('anthropics/skills')).toHaveAttribute(
+      'title',
+      'anthropics/skills'
+    )
+
+    await openSettings()
+    expect(screen.getByRole('heading', { level: 1 }).querySelector('.dot')).toBeNull()
+  })
+
+  it('shows a grey toolbar dot for a disabled selected Registry', async () => {
+    render(
+      <App
+        api={fakeApi(syncStatus(), [], {
+          listRegistries: vi
+            .fn()
+            .mockResolvedValue([registryRecord({ enabled: false, colour: '#aabbcc' })]),
+        })}
+      />
+    )
+    await screen.findByRole('navigation', { name: 'Registries' })
+
+    fireEvent.click(registryButton('anthropics/skills'))
+    expect(screen.getByRole('heading', { level: 1 }).querySelector('.dot')).toHaveStyle({
+      background: '#5b5b64',
+    })
+  })
+
   it('returns from Settings to the filtered view when a Registry is selected', async () => {
     render(<App api={fakeApi(syncStatus())} />)
     await screen.findByText('Synced')
