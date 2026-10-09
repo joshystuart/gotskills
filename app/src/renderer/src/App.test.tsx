@@ -4460,4 +4460,135 @@ describe('Catalogue multi-selection', () => {
       await refresh.promise
     })
   })
+
+  describe('installing the selection', () => {
+    const BOTH: SkillSummary['perTarget'] = [
+      { target: '~/.claude/skills', state: 'not-installed' },
+      { target: '~/.agents/skills', state: 'not-installed' },
+    ]
+    const INSTALLABLE = [
+      skill({ id: 'alpha', name: 'Alpha', description: 'a', perTarget: BOTH }),
+      skill({
+        id: 'beta',
+        name: 'Beta',
+        description: 'b',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'installed' },
+          { target: '~/.agents/skills', state: 'not-installed' },
+        ],
+      }),
+      skill({
+        id: 'gamma',
+        name: 'Gamma',
+        description: 'c',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'installed' },
+          { target: '~/.agents/skills', state: 'installed' },
+        ],
+      }),
+      skill({ id: 'delta', name: 'Delta', description: 'd', perTarget: BOTH }),
+    ]
+
+    function bar(): HTMLElement {
+      return screen.getByRole('region', { name: 'Selection' })
+    }
+
+    function selectAlphaToGamma(): void {
+      fireEvent.click(row('Alpha'))
+      fireEvent.click(row('Gamma'), { shiftKey: true })
+    }
+
+    it('counts what will install and what is skipped, and chips change the requested targets', async () => {
+      const install = vi.fn().mockResolvedValue({})
+      const api = await renderList(INSTALLABLE, {
+        install,
+        repair: vi.fn(),
+        refresh: vi.fn().mockResolvedValue({ registries: [] }),
+      })
+      selectAlphaToGamma()
+      expect(selectionCount()).toHaveTextContent('3 selected · 1 already installed')
+      expect(within(bar()).getByRole('button', { name: 'Install (2)' })).toBeEnabled()
+
+      fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Cursor' }))
+      expect(selectionCount()).toHaveTextContent('3 selected · 2 already installed')
+      await act(async () => {
+        within(bar()).getByRole('button', { name: 'Install (1)' }).click()
+      })
+
+      expect(install.mock.calls.map(([req]) => req)).toEqual([
+        {
+          registryId: REG,
+          folderName: 'alpha',
+          targets: ['~/.claude/skills'],
+          mirrorRevision: 'deadbeef',
+        },
+      ])
+      expect(api.repair).not.toHaveBeenCalled()
+      expect(api.refresh).not.toHaveBeenCalled()
+    })
+
+    it('disables Install with no chip on', async () => {
+      await renderList(INSTALLABLE)
+      selectAlphaToGamma()
+      fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Claude Code' }))
+      fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Cursor' }))
+      expect(within(bar()).getByRole('button', { name: 'Install (0)' })).toBeDisabled()
+    })
+
+    it('runs one skill at a time with progress, then shows the summary and clears the selection', async () => {
+      const first = deferred<InstallResult>()
+      const install = vi
+        .fn()
+        .mockReturnValueOnce(first.promise)
+        .mockRejectedValueOnce(new Error('Already exists'))
+      await renderList(INSTALLABLE, { install })
+      fireEvent.click(row('Alpha'))
+      fireEvent.click(row('Delta'), { shiftKey: true })
+      fireEvent.click(within(bar()).getByRole('button', { name: 'Install (3)' }))
+
+      expect(await within(bar()).findByText('Installing Alpha — 1 of 3')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Refresh catalogue' })).toBeDisabled()
+      await act(async () => {
+        first.resolve({} as InstallResult)
+        await first.promise
+      })
+
+      expect(
+        await within(bar()).findByText('2 installed · 1 failed · 0 held back')
+      ).toBeInTheDocument()
+      expect(within(bar()).getByText('Beta: Already exists')).toBeInTheDocument()
+      expect(install.mock.calls.map(([req]) => req.folderName)).toEqual(['alpha', 'beta', 'delta'])
+      expect(row('Alpha')).toHaveAttribute('aria-selected', 'false')
+
+      fireEvent.click(within(bar()).getByRole('button', { name: 'Dismiss' }))
+      expect(screen.queryByRole('region', { name: 'Selection' })).not.toBeInTheDocument()
+    })
+
+    it('a reload that marks a selected skill installed lowers the count', async () => {
+      let push: (() => void) | undefined
+      let current = INSTALLABLE
+      await renderList(INSTALLABLE, {
+        getCatalogue: vi.fn(() =>
+          Promise.resolve({ skills: current, syncStatus: syncStatus({ registries: [reg()] }) })
+        ),
+        onCatalogueUpdated: vi.fn((cb: () => void) => {
+          push = cb
+          return () => {}
+        }),
+      })
+      selectAlphaToGamma()
+      expect(within(bar()).getByRole('button', { name: 'Install (2)' })).toBeInTheDocument()
+
+      current = INSTALLABLE.map((s) =>
+        s.id === 'alpha'
+          ? { ...s, perTarget: BOTH.map((p) => ({ ...p, state: 'installed' as const })) }
+          : s
+      )
+      await act(async () => {
+        push?.()
+      })
+      expect(await within(bar()).findByRole('button', { name: 'Install (1)' })).toBeInTheDocument()
+      expect(selectionCount()).toHaveTextContent('3 selected · 2 already installed')
+    })
+  })
 })

@@ -1591,3 +1591,16 @@ button:disabled {
   justify-content: flex-end;
   gap: 10px;
 }
+
+.selection-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.selection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}

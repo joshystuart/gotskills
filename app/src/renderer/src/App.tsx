@@ -12,6 +12,7 @@ import type {
   SupportedAgent,
   SyncStatus,
 } from '../../shared/ipc'
+import { deriveInstallWork, runBulkInstall } from './bulkInstall'
 import { runBulkUpdate } from './bulkUpdate'
 import { AppUpdateSettings } from './AppUpdateSettings'
 import { AppUpdateBanner } from './AppUpdateBanner'
@@ -43,7 +44,7 @@ import {
   type CatalogueSelection,
   type ClickModifiers,
 } from './catalogueSelection'
-import { SelectionBar } from './SelectionBar'
+import { SelectionBar, type BulkInstallPhase } from './SelectionBar'
 import { Toolbar } from './Toolbar'
 import { UpdateAllRegion, type UpdateAllPhase } from './UpdateAllRegion'
 
@@ -98,6 +99,9 @@ export function App({ api }: AppProps): JSX.Element {
    */
   const [runAcknowledgeStale, setRunAcknowledgeStale] = useState(false)
   const [runInFlight, setRunInFlight] = useState(false)
+  const [installChips, setInstallChips] = useState<InstallTargetId[]>([])
+  const [installPhase, setInstallPhase] = useState<BulkInstallPhase>({ kind: 'idle' })
+  const [installAcknowledgeStale, setInstallAcknowledgeStale] = useState(false)
   const searchRef = useRef<HTMLInputElement | null>(null)
   /**
    * Kept live so a bulk run always dispatches against the current sync
@@ -447,19 +451,60 @@ export function App({ api }: AppProps): JSX.Element {
   function onRowClick(skillId: string, modifiers: ClickModifiers): void {
     const multi = modifiers.meta || modifiers.shift
     if (multi && runInFlight) return
-    setSelection((current) =>
-      nextSelection(
-        current,
-        visibleSkills.map((s) => s.id),
-        skillId,
-        modifiers,
-        selectedId
-      )
+    const next = nextSelection(
+      selection,
+      visibleSkills.map((s) => s.id),
+      skillId,
+      modifiers,
+      selectedId
     )
+    if (selection.ids.size === 0 && next.ids.size > 0) {
+      setInstallChips(visibleTargetIds)
+      setInstallAcknowledgeStale(false)
+    }
+    setSelection(next)
     setSelectedId(skillId)
   }
 
-  const showSelectionBar = selection.ids.size >= 2
+  const showSelectionBar = selection.ids.size >= 2 || installPhase.kind !== 'idle'
+  const installWork = deriveInstallWork(
+    skills.filter((s) => selection.ids.has(s.id)),
+    visibleTargetIds.filter((id) => installChips.includes(id)),
+    { acknowledgeStale: installAcknowledgeStale, isInstalledOnly, status }
+  )
+
+  function toggleInstallChip(target: InstallTargetId): void {
+    setInstallChips((chips) =>
+      chips.includes(target) ? chips.filter((t) => t !== target) : [...chips, target]
+    )
+  }
+
+  async function onRunInstallSelection(): Promise<void> {
+    if (runInFlight || installWork.items.length === 0) return
+    runInFlightRef.current = true
+    cancelRunRef.current = false
+    setRunInFlight(true)
+    try {
+      const result = await runBulkInstall({
+        api,
+        work: installWork,
+        getRevision: revisionForRegistry,
+        onProgress: (progress) => setInstallPhase({ kind: 'installing', ...progress }),
+        isCancelled: () => cancelRunRef.current,
+      })
+      setInstallPhase({ kind: 'summary', ...result })
+    } finally {
+      runInFlightRef.current = false
+      setRunInFlight(false)
+      setSelection(EMPTY_SELECTION)
+      await loadCatalogue()
+    }
+  }
+
+  function dismissInstallSummary(): void {
+    setInstallPhase({ kind: 'idle' })
+    setInstallAcknowledgeStale(false)
+  }
 
   const updateAllWork = deriveUpdateWork(skills, status)
   const updateAllItems = updateAllWork.all
@@ -720,7 +765,18 @@ export function App({ api }: AppProps): JSX.Element {
             {showSelectionBar ? (
               <SelectionBar
                 count={selection.ids.size}
+                work={installWork}
+                phase={installPhase}
+                targets={visibleTargets}
+                chosenTargets={installChips}
+                busy={busy}
+                acknowledgeStale={installAcknowledgeStale}
+                onAcknowledgeStale={setInstallAcknowledgeStale}
+                onToggleTarget={toggleInstallChip}
                 onClear={() => setSelection(EMPTY_SELECTION)}
+                onInstall={() => void onRunInstallSelection()}
+                onCancel={cancelUpdateAll}
+                onDismiss={dismissInstallSummary}
               />
             ) : (
               <UpdateAllRegion
