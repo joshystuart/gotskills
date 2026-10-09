@@ -2633,7 +2633,7 @@ describe('Registry Name', () => {
       'Team skills — anthropics/skills'
     )
     expect(
-      within(screen.getByRole('listitem')).getByRole('img', { name: 'Team skills' })
+      within(screen.getByRole('option')).getByRole('img', { name: 'Team skills' })
     ).toBeInTheDocument()
 
     await openSettings()
