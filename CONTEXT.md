@@ -8,6 +8,10 @@ This context describes how skill sources contribute to the catalogue presented b
 A configured Git repository with one selected branch that supplies skills to the app. A GitHub owner/repository can be configured only once; changing its branch changes that registry.
 _Avoid_: Repo, source
 
+**Registry Name**:
+The name a registry is shown by across the app: a friendly name the user gives it, or, when none is given, `owner/repo` for GitHub and host/path otherwise. It is display only; a registry is identified by its id.
+_Avoid_: Registry label, alias, nickname
+
 **Private Registry**:
 A registry hosted in a private GitHub repository and accessed over HTTPS using credentials already available to system Git. The app does not own a GitHub sign-in or credential.
 _Avoid_: Private repo, authenticated source
