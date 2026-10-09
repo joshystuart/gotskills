@@ -383,31 +383,34 @@ export function deriveUpdateItems(skills: SkillSummary[]): UpdateItem[] {
  */
 export function deriveUpdateWork(skills: SkillSummary[], status: SyncStatus | null): UpdateWorkSet {
   const all = deriveUpdateItems(skills)
-  const ready: UpdateItem[] = []
-  const staleGated: UpdateItem[] = []
+  const ready = all.filter((item) => !item.staleGated)
+  const staleGated = all.filter((item) => item.staleGated)
+  return { all, ready, staleGated, disclosures: staleDisclosures(staleGated, skills, status) }
+}
+
+/**
+ * One disclosure per stale Registry among `gated`, in first-seen order, with
+ * its label, last-synced time and how many of `gated` it supplies.
+ */
+export function staleDisclosures(
+  gated: readonly { registryId: string }[],
+  skills: SkillSummary[],
+  status: SyncStatus | null
+): StaleRegistryDisclosure[] {
   const disclosures: StaleRegistryDisclosure[] = []
-  const labels = new Map<string, string>()
-  for (const skill of skills) {
-    if (!labels.has(skill.registryId)) labels.set(skill.registryId, skill.registryLabel)
-  }
-  for (const item of all) {
-    if (!item.staleGated) {
-      ready.push(item)
-      continue
-    }
-    staleGated.push(item)
+  for (const item of gated) {
     const existing = disclosures.find((d) => d.registryId === item.registryId)
     if (existing) {
       existing.affected += 1
-    } else {
-      disclosures.push({
-        registryId: item.registryId,
-        label: labels.get(item.registryId) ?? item.registryId,
-        lastSyncedAt:
-          status?.registries.find((r) => r.registryId === item.registryId)?.lastSyncedAt ?? null,
-        affected: 1,
-      })
+      continue
     }
+    disclosures.push({
+      registryId: item.registryId,
+      label: skills.find((s) => s.registryId === item.registryId)?.registryLabel ?? item.registryId,
+      lastSyncedAt:
+        status?.registries.find((r) => r.registryId === item.registryId)?.lastSyncedAt ?? null,
+      affected: 1,
+    })
   }
-  return { all, ready, staleGated, disclosures }
+  return disclosures
 }

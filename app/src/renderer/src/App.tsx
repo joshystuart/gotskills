@@ -12,6 +12,7 @@ import type {
   SupportedAgent,
   SyncStatus,
 } from '../../shared/ipc'
+import { deriveInstallWork, runBulkInstall } from './bulkInstall'
 import { runBulkUpdate } from './bulkUpdate'
 import { AppUpdateSettings } from './AppUpdateSettings'
 import { AppUpdateBanner } from './AppUpdateBanner'
@@ -36,6 +37,14 @@ import {
   type CatalogueView,
   type RegistryFilter,
 } from './cataloguePresentation'
+import {
+  EMPTY_SELECTION,
+  nextSelection,
+  pruneSelection,
+  type CatalogueSelection,
+  type ClickModifiers,
+} from './catalogueSelection'
+import { SelectionBar, type BulkInstallPhase } from './SelectionBar'
 import { Toolbar } from './Toolbar'
 import { UpdateAllRegion, type UpdateAllPhase } from './UpdateAllRegion'
 
@@ -59,6 +68,7 @@ export function App({ api }: AppProps): JSX.Element {
   const [view, setView] = useState<CatalogueView>('all')
   const [registryFilter, setRegistryFilter] = useState<RegistryFilter>('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [selection, setSelection] = useState<CatalogueSelection>(EMPTY_SELECTION)
   const [refreshing, setRefreshing] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchFocusRequest, setSearchFocusRequest] = useState(0)
@@ -89,6 +99,9 @@ export function App({ api }: AppProps): JSX.Element {
    */
   const [runAcknowledgeStale, setRunAcknowledgeStale] = useState(false)
   const [runInFlight, setRunInFlight] = useState(false)
+  const [installChips, setInstallChips] = useState<InstallTargetId[]>([])
+  const [installPhase, setInstallPhase] = useState<BulkInstallPhase>({ kind: 'idle' })
+  const [installAcknowledgeStale, setInstallAcknowledgeStale] = useState(false)
   const searchRef = useRef<HTMLInputElement | null>(null)
   /**
    * Kept live so a bulk run always dispatches against the current sync
@@ -107,12 +120,23 @@ export function App({ api }: AppProps): JSX.Element {
    */
   const cancelRunRef = useRef(false)
 
+  /** Shows a fresh skill list and drops selected skills it no longer lists. */
+  function applySkills(next: SkillSummary[]): void {
+    setSkills(next)
+    setSelection((current) =>
+      pruneSelection(
+        current,
+        next.map((s) => s.id)
+      )
+    )
+  }
+
   async function loadCatalogue(
     isCurrent: () => boolean = () => true
   ): Promise<CatalogueSnapshot | null> {
     const [snapshot, detected] = await Promise.all([api.getCatalogue(), api.detectTargets()])
     if (!isCurrent()) return null
-    setSkills(snapshot.skills)
+    applySkills(snapshot.skills)
     setTargets(detected.targets)
     setAgents(detected.agents)
     return snapshot
@@ -231,6 +255,18 @@ export function App({ api }: AppProps): JSX.Element {
   }, [openSettings, confirmOpen])
 
   useEffect(() => {
+    setSelection(EMPTY_SELECTION)
+  }, [view, searchQuery, registryFilter])
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape' && !confirmOpen) setSelection(EMPTY_SELECTION)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [confirmOpen])
+
+  useEffect(() => {
     if (searchFocusRequest > 0) searchRef.current?.focus()
   }, [searchFocusRequest])
 
@@ -248,7 +284,7 @@ export function App({ api }: AppProps): JSX.Element {
   async function refreshAfterRegistryChange(): Promise<void> {
     const [list, snapshot] = await Promise.all([api.listRegistries(), api.getCatalogue()])
     setRegistries(list)
-    setSkills(snapshot.skills)
+    applySkills(snapshot.skills)
     setStatus(snapshot.syncStatus)
   }
 
@@ -409,6 +445,65 @@ export function App({ api }: AppProps): JSX.Element {
   /** Live accessor for a Registry's current revision, for the bulk run. */
   function revisionForRegistry(registryId: string): string | undefined {
     return statusRef.current?.registries.find((r) => r.registryId === registryId)?.revision
+  }
+
+  function onRowClick(skillId: string, modifiers: ClickModifiers): void {
+    const multi = modifiers.meta || modifiers.shift
+    if (multi && runInFlight) return
+    const next = nextSelection(
+      selection,
+      visibleSkills.map((s) => s.id),
+      skillId,
+      modifiers,
+      selectedId
+    )
+    if (selection.ids.size === 0 && next.ids.size > 0) {
+      setInstallChips(visibleTargetIds)
+      setInstallAcknowledgeStale(false)
+    }
+    setSelection(next)
+    setSelectedId(skillId)
+  }
+
+  const showSelectionBar = selection.ids.size >= 2 || installPhase.kind !== 'idle'
+  const installWork = deriveInstallWork(
+    skills.filter((s) => selection.ids.has(s.id)),
+    visibleTargetIds.filter((id) => installChips.includes(id)),
+    { acknowledgeStale: installAcknowledgeStale, isInstalledOnly, status }
+  )
+
+  function toggleInstallChip(target: InstallTargetId): void {
+    setInstallChips((chips) =>
+      chips.includes(target) ? chips.filter((t) => t !== target) : [...chips, target]
+    )
+  }
+
+  async function onRunInstallSelection(): Promise<void> {
+    const work = installWork
+    if (runInFlight || work.items.length === 0) return
+    runInFlightRef.current = true
+    cancelRunRef.current = false
+    setRunInFlight(true)
+    try {
+      const result = await runBulkInstall({
+        api,
+        work,
+        getRevision: revisionForRegistry,
+        onProgress: (progress) => setInstallPhase({ kind: 'installing', ...progress }),
+        isCancelled: () => cancelRunRef.current,
+      })
+      setInstallPhase({ kind: 'summary', ...result, disclosures: work.disclosures })
+    } finally {
+      runInFlightRef.current = false
+      setRunInFlight(false)
+      setSelection(EMPTY_SELECTION)
+      await loadCatalogue()
+    }
+  }
+
+  function dismissInstallSummary(): void {
+    setInstallPhase({ kind: 'idle' })
+    setInstallAcknowledgeStale(false)
   }
 
   const updateAllWork = deriveUpdateWork(skills, status)
@@ -667,17 +762,35 @@ export function App({ api }: AppProps): JSX.Element {
           />
         ) : (
           <>
-            <UpdateAllRegion
-              items={updateAllItems}
-              phase={updateAllPhase}
-              disabled={busy}
-              onRunAll={() => void onRunUpdateAll()}
-              onCancel={cancelUpdateAll}
-              onDismissSummary={dismissUpdateAllSummary}
-              disclosures={updateAllWork.disclosures}
-              acknowledgeStale={runAcknowledgeStale}
-              onAcknowledgeStale={setRunAcknowledgeStale}
-            />
+            {showSelectionBar ? (
+              <SelectionBar
+                count={selection.ids.size}
+                work={installWork}
+                phase={installPhase}
+                targets={visibleTargets}
+                chosenTargets={installChips}
+                busy={busy}
+                acknowledgeStale={installAcknowledgeStale}
+                onAcknowledgeStale={setInstallAcknowledgeStale}
+                onToggleTarget={toggleInstallChip}
+                onClear={() => setSelection(EMPTY_SELECTION)}
+                onInstall={() => void onRunInstallSelection()}
+                onCancel={cancelUpdateAll}
+                onDismiss={dismissInstallSummary}
+              />
+            ) : (
+              <UpdateAllRegion
+                items={updateAllItems}
+                phase={updateAllPhase}
+                disabled={busy}
+                onRunAll={() => void onRunUpdateAll()}
+                onCancel={cancelUpdateAll}
+                onDismissSummary={dismissUpdateAllSummary}
+                disclosures={updateAllWork.disclosures}
+                acknowledgeStale={runAcknowledgeStale}
+                onAcknowledgeStale={setRunAcknowledgeStale}
+              />
+            )}
             {autoUpdateNotices.map((notice) => (
               <AutoUpdateNotice
                 key={notice.id}
@@ -693,9 +806,10 @@ export function App({ api }: AppProps): JSX.Element {
                   skills={visibleSkills}
                   targets={visibleTargets}
                   selectedId={selectedId}
+                  selectedIds={selection.ids}
                   emptyMessage={emptyMessage}
                   registriesById={registriesById}
-                  onSelect={setSelectedId}
+                  onRowClick={onRowClick}
                 />
               </section>
 

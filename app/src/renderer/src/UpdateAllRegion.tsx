@@ -1,10 +1,7 @@
 import type { JSX } from 'react'
 import type { BulkUpdateFailure } from './bulkUpdate'
-import {
-  formatLastSynced,
-  type StaleRegistryDisclosure,
-  type UpdateItem,
-} from './cataloguePresentation'
+import type { StaleRegistryDisclosure, UpdateItem } from './cataloguePresentation'
+import { HeldBackList, StaleDisclosures } from './StaleDisclosures'
 
 export type UpdateAllPhase =
   | { kind: 'idle' }
@@ -65,24 +62,11 @@ export function UpdateAllRegion({
             <span className="update-all-count">
               {items.length === 1 ? '1 skill has an update' : `${items.length} skills have updates`}
             </span>
-            {disclosures.length > 0 ? (
-              <div className="update-all-stale">
-                {disclosures.map((d) => (
-                  <p key={d.registryId} className="update-all-stale-line">
-                    {d.label} — {formatLastSynced(d.lastSyncedAt)} —{' '}
-                    {d.affected === 1 ? '1 skill held back' : `${d.affected} skills held back`}
-                  </p>
-                ))}
-                <label className="update-all-stale-ack">
-                  <input
-                    type="checkbox"
-                    checked={acknowledgeStale}
-                    onChange={(e) => onAcknowledgeStale(e.target.checked)}
-                  />
-                  Include held-back skills from stale registries
-                </label>
-              </div>
-            ) : null}
+            <StaleDisclosures
+              disclosures={disclosures}
+              acknowledgeStale={acknowledgeStale}
+              onAcknowledgeStale={onAcknowledgeStale}
+            />
           </div>
           <button
             type="button"
@@ -150,21 +134,7 @@ export function UpdateAllRegion({
               ))}
             </ul>
           ) : null}
-          {phase.heldBack.length > 0 ? (
-            <ul className="update-all-held-back">
-              {phase.heldBack.map((item) => {
-                const disclosure = disclosures.find((d) => d.registryId === item.registryId)
-                const detail = disclosure
-                  ? `${disclosure.label}, ${formatLastSynced(disclosure.lastSyncedAt)}`
-                  : item.registryId
-                return (
-                  <li key={item.skillId}>
-                    {item.name}: held back — stale Registry snapshot ({detail})
-                  </li>
-                )
-              })}
-            </ul>
-          ) : null}
+          <HeldBackList items={phase.heldBack} disclosures={disclosures} />
           <button
             type="button"
             className="secondary-action update-all-dismiss"
