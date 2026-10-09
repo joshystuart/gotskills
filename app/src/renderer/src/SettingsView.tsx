@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, JSX } from 'react'
-import type { RegistryRecord, SupportedAgent } from '../../shared/ipc'
+import {
+  MAX_REGISTRY_NAME_LENGTH,
+  type RegistryRecord,
+  type SupportedAgent,
+} from '../../shared/ipc'
 import {
   ACCESS_REQUIRED_GUIDANCE,
   ACCESS_REQUIRED_TITLE,
   registryDotColour,
+  automaticRegistryRecordLabel,
   registryRecordLabel,
   registryStatusLabel,
 } from './cataloguePresentation'
@@ -13,9 +18,11 @@ interface RegistryEditForm {
   editingId: string | null
   url: string
   branch: string
+  name: string
   branchWarn: boolean
   onUrlChange: (url: string) => void
   onBranchChange: (branch: string) => void
+  onNameChange: (name: string) => void
   onStart: (registry: RegistryRecord) => void
   onCancel: () => void
   onAttempt: (event: FormEvent, registry: RegistryRecord) => void
@@ -264,6 +271,18 @@ function RegistryEditRow({ registry, registryBusy, form }: RegistryEditRowProps)
         onSubmit={(e) => form.onAttempt(e, registry)}
       >
         <div className="fields">
+          <label className="field">
+            <span className="field-label">Name</span>
+            <input
+              className="field-input"
+              type="text"
+              value={form.name}
+              placeholder={automaticRegistryRecordLabel(registry)}
+              maxLength={MAX_REGISTRY_NAME_LENGTH}
+              onChange={(e) => form.onNameChange(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
           <label className="field">
             <span className="field-label">Registry URL</span>
             <input

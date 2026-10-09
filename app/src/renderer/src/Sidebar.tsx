@@ -4,6 +4,7 @@ import logoUrl from './assets/logo.svg'
 import {
   CATALOGUE_VIEWS,
   formatLastSynced,
+  automaticRegistryRecordLabel,
   registryDotColour,
   registryRecordLabel,
   syncLabel,
@@ -119,6 +120,7 @@ export function Sidebar({
                 .filter(Boolean)
                 .join(' ')}
               aria-pressed={registryFilter === registry.id}
+              title={automaticRegistryRecordLabel(registry)}
               onClick={() => onSelectRegistry(registry.id)}
               onContextMenu={(event) => void openRegistryMenu(event, registry)}
             >

@@ -117,6 +117,8 @@ export interface RegistryRecord {
   githubRepo: string | null
   /** Chosen Registry Colour as lowercase `#rrggbb`; null means the automatic colour. */
   colour: string | null
+  /** Friendly Registry Name; null means the automatic name. */
+  name: string | null
   syncStatus: RegistrySyncStatus
 }
 
@@ -135,7 +137,12 @@ export interface UpdateRegistryRequest {
   autoUpdate?: boolean
   /** A `#rrggbb` hex colour; stored lowercase. */
   colour?: string
+  /** Friendly Registry Name, trimmed; an empty string clears it. */
+  name?: string
 }
+
+/** Longest Registry Name allowed, after trimming. */
+export const MAX_REGISTRY_NAME_LENGTH = 40
 
 /** @deprecated Prefer RegistryRecord; retained only while callers migrate. */
 export interface RegistryConfig {

@@ -142,11 +142,21 @@ export function registryOwnerLabel(registryUrl: string | undefined): string | nu
 }
 
 /**
- * Display label for a configured Registry record: `owner/repo` for GitHub,
- * otherwise host + path, falling back to the raw URL. Mirrors the main-process
- * `registryLabel` so provenance reads identically on both sides of the seam.
+ * Registry Name for a configured Registry record: the friendly name when set,
+ * otherwise the automatic name. Mirrors the main-process `registryLabel` so
+ * provenance reads identically on both sides of the seam.
  */
 export function registryRecordLabel(registry: {
+  githubOwner: string | null
+  githubRepo: string | null
+  url: string
+  name: string | null
+}): string {
+  return registry.name ?? automaticRegistryRecordLabel(registry)
+}
+
+/** Automatic name for a Registry record: `owner/repo` for GitHub, else host + path, else the raw URL. */
+export function automaticRegistryRecordLabel(registry: {
   githubOwner: string | null
   githubRepo: string | null
   url: string

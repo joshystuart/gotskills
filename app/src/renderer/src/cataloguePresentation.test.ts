@@ -9,6 +9,7 @@ import {
   REGISTRY_PALETTE,
   registryColour,
   registryOwnerLabel,
+  registryRecordLabel,
   registryStatusLabel,
   staleSkillNotice,
   syncLabel,
@@ -113,6 +114,33 @@ describe('filterByRegistry', () => {
       skill({ registryId: 'r2', id: 'r2/b', name: 'Beta', registryLabel: 'other/repo' }),
     ]
     expect(filterByRegistry(skills, 'r2').map((s) => s.name)).toEqual(['Beta'])
+  })
+})
+
+describe('registryRecordLabel', () => {
+  const github = {
+    githubOwner: 'anthropics',
+    githubRepo: 'skills',
+    url: 'https://github.com/anthropics/skills',
+  }
+
+  it('uses the friendly name when one is set', () => {
+    expect(registryRecordLabel({ ...github, name: 'Team skills' })).toBe('Team skills')
+  })
+
+  it('falls back to owner/repo without a name', () => {
+    expect(registryRecordLabel({ ...github, name: null })).toBe('anthropics/skills')
+  })
+
+  it('falls back to host and path for a non-GitHub Registry without a name', () => {
+    expect(
+      registryRecordLabel({
+        githubOwner: null,
+        githubRepo: null,
+        url: 'https://git.example.com/team/skills/',
+        name: null,
+      })
+    ).toBe('git.example.com/team/skills')
   })
 })
 

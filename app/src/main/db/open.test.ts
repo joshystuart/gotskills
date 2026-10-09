@@ -73,13 +73,14 @@ describe('openDatabase (PRAGMA user_version migrations)', () => {
     `)
     previous.close()
     const db = openDatabase(path)
-    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 9 })
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 10 })
     expect(db.prepare('PRAGMA foreign_keys').get()).toEqual({ foreign_keys: 1 })
     expect(db.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' })
-    expect(db.prepare('SELECT id, branch, colour FROM registry').get()).toEqual({
+    expect(db.prepare('SELECT id, branch, colour, name FROM registry').get()).toEqual({
       id: 'saved',
       branch: 'main',
       colour: null,
+      name: null,
     })
     expect(db.prepare('SELECT name, description FROM skill').get()).toEqual({
       name: 'Alpha',
@@ -95,11 +96,11 @@ describe('openDatabase (PRAGMA user_version migrations)', () => {
     db.close()
   })
 
-  it('applies the multi-registry schema to a fresh DB and sets user_version to 9', () => {
+  it('applies the multi-registry schema to a fresh DB and sets user_version to 10', () => {
     const dir = mkdtempSync(join(tmpdir(), 'igs-db-'))
     dirs.push(dir)
     const db = openDatabase(join(dir, 'cache.sqlite'))
-    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(9)
+    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(10)
 
     const tables = db
       .prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
@@ -166,7 +167,7 @@ describe('openDatabase (PRAGMA user_version migrations)', () => {
     previous.close()
 
     const upgraded = openDatabase(path)
-    expect(upgraded.prepare('PRAGMA user_version').get()!.user_version).toBe(9)
+    expect(upgraded.prepare('PRAGMA user_version').get()!.user_version).toBe(10)
     expect(upgraded.prepare(`SELECT * FROM install_record ORDER BY installed_at`).all()).toEqual([
       {
         target: '~/.claude/skills',
@@ -297,7 +298,7 @@ describe('openDatabase (PRAGMA user_version migrations)', () => {
     first.close()
 
     const second = openDatabase(path)
-    expect(second.prepare('PRAGMA user_version').get()!.user_version).toBe(9)
+    expect(second.prepare('PRAGMA user_version').get()!.user_version).toBe(10)
     const row = second.prepare(`SELECT id FROM registry WHERE id = 'r1'`).get() as
       { id: string } | undefined
     expect(row?.id).toBe('r1')
@@ -326,7 +327,7 @@ describe('openDatabase (PRAGMA user_version migrations)', () => {
     v3.close()
 
     const upgraded = openDatabase(path)
-    expect(upgraded.prepare('PRAGMA user_version').get()!.user_version).toBe(9)
+    expect(upgraded.prepare('PRAGMA user_version').get()!.user_version).toBe(10)
 
     expect(
       upgraded

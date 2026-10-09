@@ -32,6 +32,7 @@ const DEFAULT_REGISTRY_RECORD: RegistryRecord = {
   githubOwner: 'anthropics',
   githubRepo: 'skills',
   colour: null,
+  name: null,
   syncStatus: { registryId: 'default', phase: 'synced', lastSyncedAt: null },
 }
 
@@ -301,6 +302,7 @@ describe('App shell', () => {
       githubOwner: 'example-org',
       githubRepo: 'skills',
       colour: null,
+      name: null,
       syncStatus: { registryId: 'reg-2', phase: 'synced', lastSyncedAt: null },
     }
     const skills = [
@@ -455,6 +457,7 @@ describe('App shell', () => {
       id: 'default',
       url: 'https://github.com/example/trial-skills',
       branch: 'main',
+      name: '',
     })
   })
 
@@ -2566,6 +2569,7 @@ describe('Settings registry list', () => {
       id: 'default',
       url: DEFAULT_REGISTRY_RECORD.url,
       branch: 'next',
+      name: '',
     })
   })
 
@@ -2603,6 +2607,79 @@ describe('Settings registry list', () => {
     expect(api.updateRegistry).not.toHaveBeenCalled()
     expect(screen.queryByText(/update source/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Branch')).not.toBeInTheDocument()
+  })
+})
+
+describe('Registry Name', () => {
+  it('shows the friendly name in the sidebar, Settings and catalogue rows, with owner/repo on hover', async () => {
+    const skills = [
+      skill({
+        id: 'default/alpha',
+        registryId: 'default',
+        folderName: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        registryLabel: 'Team skills',
+      }),
+    ]
+    const api = fakeApi(syncStatus(), skills, {
+      listRegistries: vi.fn().mockResolvedValue([registryRecord({ name: 'Team skills' })]),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Alpha')
+
+    expect(registryButton('Team skills')).toHaveAttribute('title', 'anthropics/skills')
+    expect(
+      within(screen.getByRole('listitem')).getByRole('img', { name: 'Team skills' })
+    ).toBeInTheDocument()
+
+    await openSettings()
+    expect(screen.getByRole('button', { name: 'Edit Team skills' })).toBeInTheDocument()
+  })
+
+  it('edits the name from the Settings edit form', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([registryRecord({ name: 'Team skills' })]),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    await act(async () => {
+      screen.getByRole('button', { name: 'Edit Team skills' }).click()
+    })
+
+    const field = screen.getByLabelText('Name')
+    expect(field).toHaveValue('Team skills')
+    expect(field).toHaveAttribute('placeholder', 'anthropics/skills')
+
+    fireEvent.change(field, { target: { value: 'Shared skills' } })
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save' }).click()
+    })
+    expect(api.updateRegistry).toHaveBeenCalledWith({
+      id: 'default',
+      url: DEFAULT_REGISTRY_RECORD.url,
+      branch: 'main',
+      name: 'Shared skills',
+    })
+  })
+
+  it('starts the Name field empty without a friendly name and sends an empty name to clear it', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockResolvedValue([registryRecord()]),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    await act(async () => {
+      screen.getByRole('button', { name: 'Edit anthropics/skills' }).click()
+    })
+
+    expect(screen.getByLabelText('Name')).toHaveValue('')
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save' }).click()
+    })
+    expect(api.updateRegistry).toHaveBeenCalledWith(expect.objectContaining({ name: '' }))
   })
 })
 
@@ -2903,6 +2980,7 @@ describe('Update all', () => {
       githubOwner: 'example-org',
       githubRepo: 'skills',
       colour: null,
+      name: null,
       syncStatus: { registryId: 'reg-2', phase: 'synced', lastSyncedAt: null },
     }
     const skills = [

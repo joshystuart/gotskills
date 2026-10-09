@@ -82,6 +82,7 @@ export function App({ api }: AppProps): JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editUrl, setEditUrl] = useState('')
   const [editBranch, setEditBranch] = useState('')
+  const [editName, setEditName] = useState('')
   const [branchWarn, setBranchWarn] = useState(false)
   const [registryBusy, setRegistryBusy] = useState(false)
   const [registryError, setRegistryError] = useState<string | null>(null)
@@ -349,6 +350,7 @@ export function App({ api }: AppProps): JSX.Element {
     setEditingId(registry.id)
     setEditUrl(registry.url)
     setEditBranch(registry.branch)
+    setEditName(registry.name ?? '')
     setBranchWarn(false)
     setRegistryError(null)
   }
@@ -366,6 +368,7 @@ export function App({ api }: AppProps): JSX.Element {
         id: registry.id,
         url: editUrl.trim(),
         branch: editBranch.trim(),
+        name: editName.trim(),
       })
       setEditingId(null)
       setBranchWarn(false)
@@ -775,9 +778,11 @@ export function App({ api }: AppProps): JSX.Element {
               editingId,
               url: editUrl,
               branch: editBranch,
+              name: editName,
               branchWarn,
               onUrlChange: setEditUrl,
               onBranchChange: setEditBranch,
+              onNameChange: setEditName,
               onStart: startEdit,
               onCancel: cancelEdit,
               onAttempt: attemptEdit,

@@ -11,6 +11,7 @@ function record(overrides: Partial<RegistryRecord> = {}): RegistryRecord {
     autoUpdate: true,
     githubOwner: 'team',
     githubRepo: 'skills',
+    name: null,
     colour: null,
     syncStatus: { registryId: 'team', phase: 'synced', lastSyncedAt: null },
     ...overrides,
