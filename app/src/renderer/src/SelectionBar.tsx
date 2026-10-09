@@ -1,7 +1,8 @@
 import type { JSX } from 'react'
 import type { InstallTargetId, InstallTargetStatus } from '../../shared/ipc'
 import type { BulkInstallFailure, InstallItem, InstallWork } from './bulkInstall'
-import { formatLastSynced } from './cataloguePresentation'
+import type { StaleRegistryDisclosure } from './cataloguePresentation'
+import { HeldBackList, StaleDisclosures } from './StaleDisclosures'
 
 export type BulkInstallPhase =
   | { kind: 'idle' }
@@ -11,6 +12,8 @@ export type BulkInstallPhase =
       installed: number
       failures: BulkInstallFailure[]
       heldBack: InstallItem[]
+      /** The stale-Registry disclosures captured when the run started. */
+      disclosures: StaleRegistryDisclosure[]
       cancelled: boolean
     }
 
@@ -36,7 +39,7 @@ interface SelectionBarProps {
  * skills are selected, and while a bulk install run or its summary shows.
  */
 export function SelectionBar(props: SelectionBarProps): JSX.Element {
-  const { phase, work } = props
+  const { phase } = props
   return (
     <div className="update-all selection-bar" role="region" aria-label="Selection">
       {phase.kind === 'idle' ? <IdleBar {...props} /> : null}
@@ -68,21 +71,7 @@ export function SelectionBar(props: SelectionBarProps): JSX.Element {
               ))}
             </ul>
           ) : null}
-          {phase.heldBack.length > 0 ? (
-            <ul className="update-all-held-back">
-              {phase.heldBack.map((item) => {
-                const disclosure = work.disclosures.find((d) => d.registryId === item.registryId)
-                const detail = disclosure
-                  ? `${disclosure.label}, ${formatLastSynced(disclosure.lastSyncedAt)}`
-                  : item.registryId
-                return (
-                  <li key={item.skillId}>
-                    {item.name}: held back — stale Registry snapshot ({detail})
-                  </li>
-                )
-              })}
-            </ul>
-          ) : null}
+          <HeldBackList items={phase.heldBack} disclosures={phase.disclosures} />
           <button
             type="button"
             className="secondary-action update-all-dismiss"
@@ -127,24 +116,11 @@ function IdleBar({
             </label>
           ))}
         </div>
-        {work.disclosures.length > 0 ? (
-          <div className="update-all-stale">
-            {work.disclosures.map((d) => (
-              <p key={d.registryId} className="update-all-stale-line">
-                {d.label} — {formatLastSynced(d.lastSyncedAt)} —{' '}
-                {d.affected === 1 ? '1 skill held back' : `${d.affected} skills held back`}
-              </p>
-            ))}
-            <label className="update-all-stale-ack">
-              <input
-                type="checkbox"
-                checked={acknowledgeStale}
-                onChange={(e) => onAcknowledgeStale(e.target.checked)}
-              />
-              Include held-back skills from stale registries
-            </label>
-          </div>
-        ) : null}
+        <StaleDisclosures
+          disclosures={work.disclosures}
+          acknowledgeStale={acknowledgeStale}
+          onAcknowledgeStale={onAcknowledgeStale}
+        />
       </div>
       <button type="button" className="secondary" onClick={onClear}>
         Clear

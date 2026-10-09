@@ -4564,6 +4564,46 @@ describe('Catalogue multi-selection', () => {
       expect(screen.queryByRole('region', { name: 'Selection' })).not.toBeInTheDocument()
     })
 
+    it('names the stale Registry and its last sync for held-back skills in the summary', async () => {
+      const lastSynced = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()
+      const staleReg: RegistrySyncStatus = {
+        registryId: 'reg-stale',
+        phase: 'failed',
+        stale: true,
+        lastSyncedAt: lastSynced,
+        revision: 'cafebabe',
+        reason: 'offline',
+      }
+      const skills = [
+        skill({ id: 'alpha', name: 'Alpha', description: 'a', perTarget: BOTH }),
+        skill({
+          id: 'gamma',
+          registryId: 'reg-stale',
+          registryLabel: 'example-org/skills',
+          name: 'Gamma',
+          description: 'c',
+          stale: true,
+          perTarget: BOTH,
+        }),
+      ]
+      const api = fakeApi(syncStatus({ registries: [reg(), staleReg] }), skills, {
+        install: vi.fn().mockResolvedValue({}),
+      })
+      render(<App api={api} />)
+      await screen.findByText('Alpha')
+      fireEvent.click(row('Alpha'))
+      fireEvent.click(row('Gamma'), { shiftKey: true })
+      await act(async () => {
+        within(bar()).getByRole('button', { name: 'Install (1)' }).click()
+      })
+
+      expect(
+        await within(bar()).findByText(
+          'Gamma: held back — stale Registry snapshot (example-org/skills, last synced 3h ago)'
+        )
+      ).toBeInTheDocument()
+    })
+
     it('a reload that marks a selected skill installed lowers the count', async () => {
       let push: (() => void) | undefined
       let current = INSTALLABLE

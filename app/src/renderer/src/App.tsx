@@ -120,18 +120,23 @@ export function App({ api }: AppProps): JSX.Element {
    */
   const cancelRunRef = useRef(false)
 
+  /** Shows a fresh skill list and drops selected skills it no longer lists. */
+  function applySkills(next: SkillSummary[]): void {
+    setSkills(next)
+    setSelection((current) =>
+      pruneSelection(
+        current,
+        next.map((s) => s.id)
+      )
+    )
+  }
+
   async function loadCatalogue(
     isCurrent: () => boolean = () => true
   ): Promise<CatalogueSnapshot | null> {
     const [snapshot, detected] = await Promise.all([api.getCatalogue(), api.detectTargets()])
     if (!isCurrent()) return null
-    setSkills(snapshot.skills)
-    setSelection((current) =>
-      pruneSelection(
-        current,
-        snapshot.skills.map((s) => s.id)
-      )
-    )
+    applySkills(snapshot.skills)
     setTargets(detected.targets)
     setAgents(detected.agents)
     return snapshot
@@ -279,13 +284,7 @@ export function App({ api }: AppProps): JSX.Element {
   async function refreshAfterRegistryChange(): Promise<void> {
     const [list, snapshot] = await Promise.all([api.listRegistries(), api.getCatalogue()])
     setRegistries(list)
-    setSkills(snapshot.skills)
-    setSelection((current) =>
-      pruneSelection(
-        current,
-        snapshot.skills.map((s) => s.id)
-      )
-    )
+    applySkills(snapshot.skills)
     setStatus(snapshot.syncStatus)
   }
 
@@ -480,19 +479,20 @@ export function App({ api }: AppProps): JSX.Element {
   }
 
   async function onRunInstallSelection(): Promise<void> {
-    if (runInFlight || installWork.items.length === 0) return
+    const work = installWork
+    if (runInFlight || work.items.length === 0) return
     runInFlightRef.current = true
     cancelRunRef.current = false
     setRunInFlight(true)
     try {
       const result = await runBulkInstall({
         api,
-        work: installWork,
+        work,
         getRevision: revisionForRegistry,
         onProgress: (progress) => setInstallPhase({ kind: 'installing', ...progress }),
         isCancelled: () => cancelRunRef.current,
       })
-      setInstallPhase({ kind: 'summary', ...result })
+      setInstallPhase({ kind: 'summary', ...result, disclosures: work.disclosures })
     } finally {
       runInFlightRef.current = false
       setRunInFlight(false)
