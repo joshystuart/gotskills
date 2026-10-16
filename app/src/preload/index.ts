@@ -14,6 +14,9 @@ const api: RendererApi = {
   getAutoDownloadAppUpdates: () => ipcRenderer.invoke(IpcRequest.getAutoDownloadAppUpdates),
   setAutoDownloadAppUpdates: (enabled) =>
     ipcRenderer.invoke(IpcRequest.setAutoDownloadAppUpdates, enabled),
+  getAppearance: () => ipcRenderer.invoke(IpcRequest.getAppearance),
+  setTheme: (theme) => ipcRenderer.invoke(IpcRequest.setTheme, theme),
+  setFontSize: (fontSize) => ipcRenderer.invoke(IpcRequest.setFontSize, fontSize),
   getAppUpdateState: () => ipcRenderer.invoke(IpcRequest.getAppUpdateState),
   downloadAppUpdate: () => ipcRenderer.invoke(IpcRequest.downloadAppUpdate),
   restartForAppUpdate: () => ipcRenderer.invoke(IpcRequest.restartForAppUpdate),

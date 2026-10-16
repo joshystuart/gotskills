@@ -350,6 +350,27 @@ export interface AppUpdateApi {
   restartForAppUpdate(): Promise<void>
 }
 
+/** The colour theme: follow macOS, or force light or dark. */
+export type Theme = 'system' | 'light' | 'dark'
+
+export const THEMES: readonly Theme[] = ['system', 'light', 'dark']
+
+/** The text size preset applied to the root element. */
+export type FontSize = 'small' | 'default' | 'large' | 'larger'
+
+export const FONT_SIZES: readonly FontSize[] = ['small', 'default', 'large', 'larger']
+
+export interface Appearance {
+  theme: Theme
+  fontSize: FontSize
+}
+
+export interface AppearanceApi {
+  getAppearance(): Promise<Appearance>
+  setTheme(theme: Theme): Promise<void>
+  setFontSize(fontSize: FontSize): Promise<void>
+}
+
 /** An action from the sidebar registry menu that the renderer runs itself. */
 export type RegistryMenuAction =
   'rename' | 'sync' | 'toggle-enabled' | 'toggle-auto-update' | 'show-settings' | 'remove'
@@ -370,7 +391,7 @@ export interface RegistryMenuApi {
 export type Unsubscribe = () => void
 
 /** What the renderer actually receives on window.api: requests + event subscriptions. */
-export interface RendererApi extends AppApi, AppUpdateApi, RegistryMenuApi {
+export interface RendererApi extends AppApi, AppUpdateApi, AppearanceApi, RegistryMenuApi {
   onAppUpdateState(cb: (state: AppUpdateState) => void): Unsubscribe
   onSyncStatus(cb: (status: SyncStatus) => void): Unsubscribe
   onCatalogueUpdated(cb: () => void): Unsubscribe
@@ -384,6 +405,9 @@ export const IpcRequest = {
   setAutoDownloadAppUpdates: 'appUpdate:setAutoDownload',
   downloadAppUpdate: 'appUpdate:download',
   restartForAppUpdate: 'appUpdate:restart',
+  getAppearance: 'appearance:get',
+  setTheme: 'appearance:setTheme',
+  setFontSize: 'appearance:setFontSize',
   detectTargets: 'api:detectTargets',
   install: 'api:install',
   reconcile: 'api:reconcile',

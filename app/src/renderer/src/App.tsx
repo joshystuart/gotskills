@@ -15,6 +15,8 @@ import type {
 } from '../../shared/ipc'
 import { deriveInstallWork, runBulkInstall } from './bulkInstall'
 import { runBulkUpdate } from './bulkUpdate'
+import { AppearanceSettings } from './AppearanceSettings'
+import { applyFontSize } from './fontSize'
 import { AppUpdateSettings } from './AppUpdateSettings'
 import { AppUpdateBanner } from './AppUpdateBanner'
 import { useAppUpdate } from './useAppUpdate'
@@ -191,6 +193,13 @@ export function App({ api }: AppProps): JSX.Element {
       offCatalogue()
       offAutoUpdate()
     }
+  }, [api])
+
+  useEffect(() => {
+    void api
+      .getAppearance()
+      .then((appearance) => applyFontSize(appearance.fontSize))
+      .catch(() => undefined)
   }, [api])
 
   useEffect(() => {
@@ -780,6 +789,7 @@ export function App({ api }: AppProps): JSX.Element {
 
         {settingsOpen ? (
           <SettingsView
+            appearanceSettings={<AppearanceSettings api={api} />}
             appUpdateSettings={<AppUpdateSettings api={api} state={appUpdate.state} />}
             registries={registries}
             agents={agents}

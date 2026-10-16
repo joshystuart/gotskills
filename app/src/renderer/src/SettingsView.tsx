@@ -42,6 +42,7 @@ interface AddRegistryForm {
 interface SettingsViewProps {
   registries: RegistryRecord[]
   agents: SupportedAgent[]
+  appearanceSettings: JSX.Element
   appUpdateSettings: JSX.Element
   registryBusy: boolean
   registryError: string | null
@@ -421,6 +422,7 @@ function AgentsSection({ agents }: { agents: SupportedAgent[] }): JSX.Element {
 export function SettingsView({
   registries,
   agents,
+  appearanceSettings,
   appUpdateSettings,
   registryBusy,
   registryError,
@@ -436,6 +438,7 @@ export function SettingsView({
   return (
     <main className="settings" aria-label="Settings">
       <div className="settings-panel">
+        {appearanceSettings}
         {appUpdateSettings}
         <section className="settings-section" aria-label="Registries">
           <h2 className="settings-subtitle">Registries</h2>
