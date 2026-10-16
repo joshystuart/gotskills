@@ -15,6 +15,21 @@
   --green: #4ade80;
   --amber: #fbbf24;
   --red: #f87171;
+  --on-amber: #1a1205;
+  --white: #fff;
+  --red-soft: #fca5a5;
+  --amber-text: #f2d38a;
+  --red-text-soft: #f8c9c9;
+  --red-text: #f3b4b4;
+  --amber-line: rgba(251, 191, 36, 0.22);
+  --amber-bg: rgba(251, 191, 36, 0.07);
+  --hover-tint: rgba(255, 255, 255, 0.03);
+  --red-line-strong: rgba(248, 113, 113, 0.35);
+  --red-line: rgba(248, 113, 113, 0.22);
+  --red-bg: rgba(248, 113, 113, 0.07);
+  --red-bg-strong: rgba(248, 113, 113, 0.1);
+  --backdrop: rgba(0, 0, 0, 0.6);
+  --shadow: rgba(0, 0, 0, 0.5);
 
   --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
@@ -39,7 +54,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 13.5px;
+  font-size: 0.84375rem;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
@@ -196,14 +211,14 @@ button:disabled {
 .nav-rename-error {
   width: 100%;
   color: var(--red);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .section-label {
   margin: 0;
   padding: 20px 10px 6px;
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   font-weight: 400;
 }
 
@@ -218,12 +233,12 @@ button:disabled {
 
 .nav-failed {
   color: var(--red);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
 }
 
 .nav-count {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--faint);
   font-variant-numeric: tabular-nums;
 }
@@ -232,8 +247,8 @@ button:disabled {
   padding: 0 7px;
   border-radius: 10px;
   background: var(--amber);
-  color: #1a1205;
-  font-size: 11px;
+  color: var(--on-amber);
+  font-size: 0.6875rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -253,7 +268,7 @@ button:disabled {
   align-items: baseline;
   gap: 0 8px;
   padding: 0 10px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   color: var(--muted);
 }
 
@@ -299,7 +314,7 @@ button:disabled {
   align-items: center;
   min-width: 0;
   margin: 0 8px 0 0;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
   white-space: pre;
 }
@@ -390,8 +405,8 @@ button:disabled {
 }
 
 .primary:hover:not(:disabled) {
-  border-color: #fff;
-  background: #fff;
+  border-color: var(--white);
+  background: var(--white);
 }
 
 .danger {
@@ -405,17 +420,17 @@ button:disabled {
 }
 
 .danger:hover:not(:disabled) {
-  border-color: #fca5a5;
-  background: #fca5a5;
+  border-color: var(--red-soft);
+  background: var(--red-soft);
 }
 
 .banner {
   flex: none;
   padding: 8px 20px;
-  border-bottom: 1px solid rgba(251, 191, 36, 0.22);
-  background: rgba(251, 191, 36, 0.07);
-  color: #f2d38a;
-  font-size: 12.5px;
+  border-bottom: 1px solid var(--amber-line);
+  background: var(--amber-bg);
+  color: var(--amber-text);
+  font-size: 0.78125rem;
 }
 
 .update-all {
@@ -426,7 +441,7 @@ button:disabled {
   padding: 8px 20px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .update-all .primary,
@@ -434,7 +449,7 @@ button:disabled {
 .update-all .secondary-action {
   height: 28px;
   padding: 0 12px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .update-all-idle {
@@ -567,7 +582,7 @@ button:disabled {
   padding-bottom: 10px;
   border-bottom: 1px solid var(--line);
   color: var(--faint);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
@@ -588,7 +603,7 @@ button:disabled {
 }
 
 .skill-row:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--hover-tint);
 }
 
 .skill-row.selected {
@@ -633,10 +648,10 @@ button:disabled {
 .skill-conflict {
   flex: none;
   padding: 0 5px;
-  border: 1px solid rgba(248, 113, 113, 0.35);
+  border: 1px solid var(--red-line-strong);
   border-radius: 4px;
   color: var(--red);
-  font-size: 11px;
+  font-size: 0.6875rem;
   white-space: nowrap;
 }
 
@@ -644,7 +659,7 @@ button:disabled {
   overflow: hidden;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -653,7 +668,7 @@ button:disabled {
   overflow: hidden;
   padding-left: 17px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -664,7 +679,7 @@ button:disabled {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   white-space: nowrap;
 }
 
@@ -738,7 +753,7 @@ button:disabled {
 .detail-eyebrow {
   margin: 0;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -754,7 +769,7 @@ button:disabled {
   border-radius: 5px;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .detail-close:hover {
@@ -764,7 +779,7 @@ button:disabled {
 
 .detail-title {
   margin: 0 0 6px;
-  font-size: 22px;
+  font-size: 1.375rem;
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -798,7 +813,7 @@ button:disabled {
   background: var(--raised);
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 0.71875rem;
 }
 
 .detail-chip dt {
@@ -822,15 +837,15 @@ button:disabled {
 .stale-notice {
   margin: 16px 0;
   padding: 10px 12px;
-  border: 1px solid rgba(251, 191, 36, 0.22);
+  border: 1px solid var(--amber-line);
   border-radius: 8px;
-  background: rgba(251, 191, 36, 0.07);
+  background: var(--amber-bg);
 }
 
 .stale-notice-text {
   margin: 0 0 8px;
-  color: #f2d38a;
-  font-size: 12.5px;
+  color: var(--amber-text);
+  font-size: 0.78125rem;
 }
 
 .stale-ack {
@@ -838,14 +853,14 @@ button:disabled {
   align-items: center;
   gap: 8px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   cursor: pointer;
 }
 
 .installed-only-note {
   margin: 16px 0;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .install-error {
@@ -877,7 +892,7 @@ button:disabled {
 .skill-files-title {
   margin: 0 0 8px;
   color: var(--faint);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
@@ -919,12 +934,12 @@ button:disabled {
 
 .fact-state {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   overflow-wrap: anywhere;
 }
 
 .fact-state .mono {
-  font-size: 11.5px;
+  font-size: 0.71875rem;
 }
 
 .fact-actions {
@@ -946,7 +961,7 @@ button:disabled {
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .fact-action:hover:not(:disabled) {
@@ -959,11 +974,11 @@ button:disabled {
 .skill-files-empty {
   margin: 0 0 12px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .skill-file-row {
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .skill-file-open {
@@ -985,7 +1000,7 @@ button:disabled {
 
 .skill-file-path {
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.75rem;
   word-break: break-all;
 }
 
@@ -998,7 +1013,7 @@ button:disabled {
 
 .skill-file-size {
   color: var(--faint);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1007,7 +1022,7 @@ button:disabled {
   border: 1px solid var(--line-2);
   border-radius: 4px;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 0.71875rem;
 }
 
 .skill-file-viewer-header {
@@ -1028,7 +1043,7 @@ button:disabled {
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .skill-file-back:hover,
@@ -1044,7 +1059,7 @@ button:disabled {
 .skill-file-truncated {
   margin: 0 0 12px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .skill-file-source {
@@ -1054,7 +1069,7 @@ button:disabled {
   border-radius: 8px;
   background: var(--bg);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-x: auto;
@@ -1074,13 +1089,13 @@ button:disabled {
   border-radius: 6px;
   background: var(--surface);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   overflow-x: auto;
 }
 
 .skill-file-markdown code {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .settings {
@@ -1101,7 +1116,7 @@ button:disabled {
 
 .settings-subtitle {
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -1109,12 +1124,12 @@ button:disabled {
   max-width: 60ch;
   margin: 0 0 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .settings-lead .mono {
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .settings-card,
@@ -1151,12 +1166,12 @@ button:disabled {
 }
 
 .settings-row-label {
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .settings-row-detail,
 .settings-row .settings-error {
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .settings-row-detail {
@@ -1208,7 +1223,7 @@ button:disabled {
   border-radius: 5px;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   white-space: nowrap;
 }
 
@@ -1238,7 +1253,7 @@ button:disabled {
   margin: 0;
   padding: 24px 16px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   text-align: center;
 }
 
@@ -1248,7 +1263,7 @@ button:disabled {
   align-items: center;
   gap: 16px;
   padding: 8px 16px;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .agent-item + .agent-item {
@@ -1258,14 +1273,14 @@ button:disabled {
 .agent-folder {
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .agent-detected {
   color: var(--faint);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .agent-detected.on {
@@ -1280,7 +1295,7 @@ button:disabled {
   padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   text-align: center;
 }
 
@@ -1314,7 +1329,7 @@ button:disabled {
 
 .field-label {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .field-input {
@@ -1325,12 +1340,12 @@ button:disabled {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .field-input-text {
   font-family: inherit;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .field-input:focus-visible {
@@ -1361,38 +1376,38 @@ button:disabled {
 
 .hint {
   color: var(--faint);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .form-actions .primary,
 .form-actions .secondary {
   height: 28px;
   padding: 0 10px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .callout {
   margin: 0;
   padding: 10px 12px;
   border-radius: 8px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .callout strong {
-  color: #f8c9c9;
+  color: var(--red-text-soft);
   font-weight: 500;
 }
 
 .callout.error {
-  border: 1px solid rgba(248, 113, 113, 0.22);
-  background: rgba(248, 113, 113, 0.07);
-  color: #f3b4b4;
+  border: 1px solid var(--red-line);
+  background: var(--red-bg);
+  color: var(--red-text);
 }
 
 .callout.warn {
-  border: 1px solid rgba(251, 191, 36, 0.22);
-  background: rgba(251, 191, 36, 0.07);
-  color: #f2d38a;
+  border: 1px solid var(--amber-line);
+  background: var(--amber-bg);
+  color: var(--amber-text);
 }
 
 .registry-item {
@@ -1459,7 +1474,7 @@ button:disabled {
   margin: 3px 0 0 15px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1471,7 +1486,7 @@ button:disabled {
   gap: 6px 14px;
   margin: 8px 0 0 15px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .registry-info .callout {
@@ -1502,7 +1517,7 @@ button:disabled {
   border: 1px solid var(--line-2);
   border-radius: 4px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 400;
 }
 
@@ -1544,7 +1559,7 @@ button:disabled {
 .registry-actions .secondary-action {
   height: 28px;
   padding: 0 10px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .registry-actions .secondary-action {
@@ -1565,13 +1580,13 @@ button:disabled {
   border-radius: 7px;
   background: transparent;
   color: var(--red);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   font-weight: 500;
 }
 
 .registry-actions .danger-action:hover:not(:disabled) {
-  border-color: rgba(248, 113, 113, 0.22);
-  background: rgba(248, 113, 113, 0.1);
+  border-color: var(--red-line);
+  background: var(--red-bg-strong);
 }
 
 .switch {
@@ -1603,7 +1618,7 @@ button:disabled {
 
 .switch[aria-checked='true']::after {
   left: 14px;
-  background: #fff;
+  background: var(--white);
 }
 
 .registry-edit {
@@ -1620,7 +1635,7 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--backdrop);
 }
 
 .modal {
@@ -1629,12 +1644,12 @@ button:disabled {
   border: 1px solid var(--line-2);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 12px 40px var(--shadow);
 }
 
 .modal-title {
   margin: 0 0 8px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
 }
 
@@ -1659,5 +1674,5 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
