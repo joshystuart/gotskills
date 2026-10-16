@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { getFontSize, getTheme, setFontSize, setTheme } from './appSettings'
 import { openDatabase } from './db/open'
-import { createThemeController } from './theme'
+import { createAppearanceController } from './appearance'
 
 function fakeNativeTheme(): { themeSource: string; shouldUseDarkColors: boolean } {
   const state = { source: 'system' }
@@ -22,57 +22,59 @@ function controller(stored?: string) {
   const db = openDatabase(':memory:')
   if (stored) db.prepare("INSERT INTO app_setting (key, value) VALUES ('theme', ?)").run(stored)
   const nativeTheme = fakeNativeTheme()
-  const theme = createThemeController({
+  const appearance = createAppearanceController({
     nativeTheme,
     getTheme: () => getTheme(db),
     setTheme: (value) => setTheme(db, value),
     getFontSize: () => getFontSize(db),
     setFontSize: (value) => setFontSize(db, value),
   })
-  return { db, nativeTheme, theme }
+  return { db, nativeTheme, appearance }
 }
 
-describe('theme controller', () => {
+describe('appearance controller', () => {
   it('applies the stored theme as the native theme source', () => {
-    const { nativeTheme, theme } = controller('light')
-    theme.apply()
+    const { nativeTheme, appearance } = controller('light')
+    appearance.apply()
     expect(nativeTheme.themeSource).toBe('light')
-    expect(theme.backgroundColor()).toBe('#ffffff')
+    expect(appearance.backgroundColor()).toBe('#ffffff')
   })
 
   it.each([undefined, 'sepia'])('applies dark when the stored theme is %s', (stored) => {
-    const { nativeTheme, theme } = controller(stored)
-    theme.apply()
+    const { nativeTheme, appearance } = controller(stored)
+    appearance.apply()
     expect(nativeTheme.themeSource).toBe('dark')
-    expect(theme.backgroundColor()).toBe('#09090b')
+    expect(appearance.backgroundColor()).toBe('#09090b')
   })
 
   it('saves a new theme and applies it at once', () => {
-    const { db, nativeTheme, theme } = controller()
-    theme.set('system')
+    const { db, nativeTheme, appearance } = controller()
+    appearance.setTheme('system')
     expect(nativeTheme.themeSource).toBe('system')
     expect(getTheme(db)).toBe('system')
-    expect(theme.get()).toEqual({ theme: 'system', fontSize: 'default' })
+    expect(appearance.get()).toEqual({ theme: 'system', fontSize: 'default' })
   })
 
   it('saves a new font size and reports it', () => {
-    const { db, theme } = controller()
-    theme.setFontSize('large')
+    const { db, appearance } = controller()
+    appearance.setFontSize('large')
     expect(getFontSize(db)).toBe('large')
-    expect(theme.get()).toEqual({ theme: 'dark', fontSize: 'large' })
+    expect(appearance.get()).toEqual({ theme: 'dark', fontSize: 'large' })
   })
 
   it('rejects an unknown font size without saving it', () => {
-    const { db, theme } = controller()
-    expect(() => theme.setFontSize('huge' as never)).toThrow(
+    const { db, appearance } = controller()
+    expect(() => appearance.setFontSize('huge' as never)).toThrow(
       'Font size must be small, default, large or larger'
     )
     expect(getFontSize(db)).toBe('default')
   })
 
   it('rejects an unknown theme without saving it', () => {
-    const { db, theme } = controller()
-    expect(() => theme.set('sepia' as never)).toThrow('Theme must be system, light or dark')
+    const { db, appearance } = controller()
+    expect(() => appearance.setTheme('sepia' as never)).toThrow(
+      'Theme must be system, light or dark'
+    )
     expect(getTheme(db)).toBe('dark')
   })
 })

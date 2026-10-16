@@ -9,7 +9,7 @@ import { createRegistryMenu, registerRegistryMenuIpc } from './registryMenu'
 import { createBackend } from './backend'
 import { isGitAvailable } from './mirror/git'
 import { IpcEvent } from '../shared/ipc'
-import { createThemeController, registerAppearanceIpc } from './theme'
+import { createAppearanceController, registerAppearanceIpc } from './appearance'
 import { registerRendererProtocol, rendererEntryUrl } from './rendererProtocol'
 
 function devAppIcon(): string | undefined {
@@ -101,16 +101,16 @@ app.whenReady().then(async () => {
     onState: (state) => win?.webContents.send(IpcEvent.appUpdateState, state),
     log: (error) => console.error('App Update:', error),
   })
-  const theme = createThemeController({
+  const appearance = createAppearanceController({
     nativeTheme,
     getTheme: backend.getTheme,
     setTheme: backend.setTheme,
     getFontSize: backend.getFontSize,
     setFontSize: backend.setFontSize,
   })
-  theme.apply()
-  nativeTheme.on('updated', () => win?.setBackgroundColor(theme.backgroundColor()))
-  registerAppearanceIpc(ipcMain, theme)
+  appearance.apply()
+  nativeTheme.on('updated', () => win?.setBackgroundColor(appearance.backgroundColor()))
+  registerAppearanceIpc(ipcMain, appearance)
   registerAppUpdateIpc(ipcMain, appUpdate)
   registerIpc(ipcMain, backend)
   registerRegistryMenuIpc(
@@ -119,7 +119,7 @@ app.whenReady().then(async () => {
     () => win
   )
 
-  win = createWindow(theme.backgroundColor())
+  win = createWindow(appearance.backgroundColor())
 
   win.webContents.on('did-finish-load', () => {
     void (async () => {
@@ -130,7 +130,7 @@ app.whenReady().then(async () => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      win = createWindow(theme.backgroundColor())
+      win = createWindow(appearance.backgroundColor())
     }
   })
 

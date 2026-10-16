@@ -17,6 +17,7 @@
   --red: #f87171;
   --on-amber: #1a1205;
   --white: #fff;
+  --primary-hover: #fff;
   --red-soft: #fca5a5;
   --amber-text: #f2d38a;
   --red-text-soft: #f8c9c9;
@@ -56,6 +57,7 @@
     --red: #dc2626;
     --on-amber: #ffffff;
     --white: #fff;
+    --primary-hover: #3f3f46;
     --red-soft: #b91c1c;
     --amber-text: #92400e;
     --red-text-soft: #991b1b;
@@ -438,8 +440,8 @@ button:disabled {
 }
 
 .primary:hover:not(:disabled) {
-  border-color: var(--white);
-  background: var(--white);
+  border-color: var(--primary-hover);
+  background: var(--primary-hover);
 }
 
 .danger {

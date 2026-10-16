@@ -11,7 +11,7 @@ import {
 /** The window background for each resolved scheme; matches the stylesheet's `--bg`. */
 const BACKGROUND = { dark: '#09090b', light: '#ffffff' } as const
 
-export interface ThemeControllerDeps {
+export interface AppearanceControllerDeps {
   nativeTheme: { themeSource: Theme | string; readonly shouldUseDarkColors: boolean }
   getTheme: () => Theme
   setTheme: (theme: Theme) => void
@@ -19,13 +19,13 @@ export interface ThemeControllerDeps {
   setFontSize: (fontSize: FontSize) => void
 }
 
-export function createThemeController({
+export function createAppearanceController({
   nativeTheme,
   getTheme,
   setTheme,
   getFontSize,
   setFontSize,
-}: ThemeControllerDeps) {
+}: AppearanceControllerDeps) {
   return {
     apply(): void {
       nativeTheme.themeSource = getTheme()
@@ -33,7 +33,7 @@ export function createThemeController({
     get(): Appearance {
       return { theme: getTheme(), fontSize: getFontSize() }
     },
-    set(theme: Theme): void {
+    setTheme(theme: Theme): void {
       if (!THEMES.includes(theme)) throw new Error('Theme must be system, light or dark')
       setTheme(theme)
       nativeTheme.themeSource = theme
@@ -50,10 +50,10 @@ export function createThemeController({
   }
 }
 
-export type ThemeController = ReturnType<typeof createThemeController>
+export type AppearanceController = ReturnType<typeof createAppearanceController>
 
-export function registerAppearanceIpc(ipcMain: IpcMain, theme: ThemeController): void {
-  ipcMain.handle(IpcRequest.getAppearance, () => theme.get())
-  ipcMain.handle(IpcRequest.setTheme, (_event, value: Theme) => theme.set(value))
-  ipcMain.handle(IpcRequest.setFontSize, (_event, value: FontSize) => theme.setFontSize(value))
+export function registerAppearanceIpc(ipcMain: IpcMain, appearance: AppearanceController): void {
+  ipcMain.handle(IpcRequest.getAppearance, () => appearance.get())
+  ipcMain.handle(IpcRequest.setTheme, (_event, value: Theme) => appearance.setTheme(value))
+  ipcMain.handle(IpcRequest.setFontSize, (_event, value: FontSize) => appearance.setFontSize(value))
 }
