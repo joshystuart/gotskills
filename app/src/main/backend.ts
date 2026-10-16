@@ -28,13 +28,16 @@ import {
   type UpdateRegistryRequest,
   MAX_REGISTRY_NAME_LENGTH,
   type Theme,
+  type FontSize,
 } from '../shared/ipc'
 import { canonicalizeRegistryUrl } from '../shared/registryUrl'
 import { DEFAULT_REGISTRY } from './config'
 import {
   getAutoDownloadAppUpdates,
+  getFontSize,
   getTheme,
   setAutoDownloadAppUpdates,
+  setFontSize,
   setTheme,
 } from './appSettings'
 import { openDatabase } from './db/open'
@@ -118,6 +121,8 @@ export interface Backend extends AppApi {
   setAutoDownloadAppUpdates(enabled: boolean): void
   getTheme(): Theme
   setTheme(theme: Theme): void
+  getFontSize(): FontSize
+  setFontSize(fontSize: FontSize): void
   isBusy(): boolean
   /** Refresh all enabled Registries; returns the aggregate status. */
   syncNow(): Promise<SyncStatus>
@@ -569,6 +574,8 @@ export function createBackend(options: BackendOptions): Backend {
     setAutoDownloadAppUpdates: (enabled) => setAutoDownloadAppUpdates(db, enabled),
     getTheme: () => getTheme(db),
     setTheme: (theme) => setTheme(db, theme),
+    getFontSize: () => getFontSize(db),
+    setFontSize: (fontSize) => setFontSize(db, fontSize),
     isBusy,
 
     async syncNow(): Promise<SyncStatus> {

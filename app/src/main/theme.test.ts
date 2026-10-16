@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getTheme, setTheme } from './appSettings'
+import { getFontSize, getTheme, setFontSize, setTheme } from './appSettings'
 import { openDatabase } from './db/open'
 import { createThemeController } from './theme'
 
@@ -26,6 +26,8 @@ function controller(stored?: string) {
     nativeTheme,
     getTheme: () => getTheme(db),
     setTheme: (value) => setTheme(db, value),
+    getFontSize: () => getFontSize(db),
+    setFontSize: (value) => setFontSize(db, value),
   })
   return { db, nativeTheme, theme }
 }
@@ -50,7 +52,22 @@ describe('theme controller', () => {
     theme.set('system')
     expect(nativeTheme.themeSource).toBe('system')
     expect(getTheme(db)).toBe('system')
-    expect(theme.get()).toEqual({ theme: 'system' })
+    expect(theme.get()).toEqual({ theme: 'system', fontSize: 'default' })
+  })
+
+  it('saves a new font size and reports it', () => {
+    const { db, theme } = controller()
+    theme.setFontSize('large')
+    expect(getFontSize(db)).toBe('large')
+    expect(theme.get()).toEqual({ theme: 'dark', fontSize: 'large' })
+  })
+
+  it('rejects an unknown font size without saving it', () => {
+    const { db, theme } = controller()
+    expect(() => theme.setFontSize('huge' as never)).toThrow(
+      'Font size must be small, default, large or larger'
+    )
+    expect(getFontSize(db)).toBe('default')
   })
 
   it('rejects an unknown theme without saving it', () => {

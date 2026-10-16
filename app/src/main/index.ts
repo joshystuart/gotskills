@@ -105,6 +105,8 @@ app.whenReady().then(async () => {
     nativeTheme,
     getTheme: backend.getTheme,
     setTheme: backend.setTheme,
+    getFontSize: backend.getFontSize,
+    setFontSize: backend.setFontSize,
   })
   theme.apply()
   nativeTheme.on('updated', () => win?.setBackgroundColor(theme.backgroundColor()))

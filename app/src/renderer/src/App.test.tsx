@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { act, fireEvent, isInaccessible, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { AppUpdateBanner } from './AppUpdateBanner'
 import {
@@ -142,8 +142,9 @@ function fakeApi(
     readSkillFile: vi.fn().mockResolvedValue({ path: '', sizeBytes: 0, kind: 'missing' }),
     showRegistryMenu: vi.fn().mockResolvedValue(null),
     checkAppUpdate: vi.fn().mockResolvedValue(undefined),
-    getAppearance: vi.fn().mockResolvedValue({ theme: 'dark' }),
+    getAppearance: vi.fn().mockResolvedValue({ theme: 'dark', fontSize: 'default' }),
     setTheme: vi.fn().mockResolvedValue(undefined),
+    setFontSize: vi.fn().mockResolvedValue(undefined),
     getAutoDownloadAppUpdates: vi.fn().mockResolvedValue(true),
     setAutoDownloadAppUpdates: vi.fn().mockResolvedValue(undefined),
     getAppUpdateState: vi.fn().mockResolvedValue({ kind: 'idle', currentVersion: '0.0.6' }),
@@ -4256,7 +4257,7 @@ describe('Settings Appearance', () => {
     render(
       <App
         api={fakeApi(syncStatus(), [], {
-          getAppearance: vi.fn().mockResolvedValue({ theme: 'system' }),
+          getAppearance: vi.fn().mockResolvedValue({ theme: 'system', fontSize: 'default' }),
         })}
       />
     )
@@ -4276,6 +4277,65 @@ describe('Settings Appearance', () => {
     const section = screen.getByRole('region', { name: 'Appearance' })
     expect(within(section).getByRole('alert')).toHaveTextContent('disk full')
     expect(themeOption('Dark')).toBeChecked()
+  })
+})
+
+describe('Settings font size', () => {
+  function fontSizeSelect(): HTMLElement {
+    const section = screen.getByRole('region', { name: 'Appearance' })
+    return within(section).getByRole('combobox', { name: 'Font size' })
+  }
+
+  afterEach(() => {
+    document.documentElement.style.fontSize = ''
+  })
+
+  it('shows Default with nothing stored and leaves the root font size alone', async () => {
+    render(<App api={fakeApi(syncStatus())} />)
+    await openSettings()
+    expect(fontSizeSelect()).toHaveValue('default')
+    expect(fontSizeSelect()).toHaveDisplayValue('Default')
+    expect(document.documentElement.style.fontSize).toBe('100%')
+  })
+
+  it('saves Large and sets the root font size to 115% at once', async () => {
+    const api = fakeApi(syncStatus())
+    render(<App api={api} />)
+    await openSettings()
+    await act(async () => {
+      fireEvent.change(fontSizeSelect(), { target: { value: 'large' } })
+    })
+    expect(api.setFontSize).toHaveBeenCalledWith('large')
+    expect(fontSizeSelect()).toHaveValue('large')
+    expect(document.documentElement.style.fontSize).toBe('115%')
+  })
+
+  it('applies the stored font size when the app opens', async () => {
+    await act(async () => {
+      render(
+        <App
+          api={fakeApi(syncStatus(), [], {
+            getAppearance: vi.fn().mockResolvedValue({ theme: 'dark', fontSize: 'larger' }),
+          })}
+        />
+      )
+    })
+    expect(document.documentElement.style.fontSize).toBe('130%')
+  })
+
+  it('shows an error under Appearance when saving fails', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      setFontSize: vi.fn().mockRejectedValue(new Error('disk full')),
+    })
+    render(<App api={api} />)
+    await openSettings()
+    await act(async () => {
+      fireEvent.change(fontSizeSelect(), { target: { value: 'small' } })
+    })
+    const section = screen.getByRole('region', { name: 'Appearance' })
+    expect(within(section).getByRole('alert')).toHaveTextContent('disk full')
+    expect(fontSizeSelect()).toHaveValue('default')
+    expect(document.documentElement.style.fontSize).toBe('100%')
   })
 })
 

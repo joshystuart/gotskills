@@ -355,13 +355,20 @@ export type Theme = 'system' | 'light' | 'dark'
 
 export const THEMES: readonly Theme[] = ['system', 'light', 'dark']
 
+/** The text size preset applied to the root element. */
+export type FontSize = 'small' | 'default' | 'large' | 'larger'
+
+export const FONT_SIZES: readonly FontSize[] = ['small', 'default', 'large', 'larger']
+
 export interface Appearance {
   theme: Theme
+  fontSize: FontSize
 }
 
 export interface AppearanceApi {
   getAppearance(): Promise<Appearance>
   setTheme(theme: Theme): Promise<void>
+  setFontSize(fontSize: FontSize): Promise<void>
 }
 
 /** An action from the sidebar registry menu that the renderer runs itself. */
@@ -400,6 +407,7 @@ export const IpcRequest = {
   restartForAppUpdate: 'appUpdate:restart',
   getAppearance: 'appearance:get',
   setTheme: 'appearance:setTheme',
+  setFontSize: 'appearance:setFontSize',
   detectTargets: 'api:detectTargets',
   install: 'api:install',
   reconcile: 'api:reconcile',
