@@ -1,5 +1,5 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light dark;
   accent-color: var(--accent);
 
   --bg: #09090b;
@@ -37,6 +37,39 @@
   --sidebar-width: 232px;
   --toolbar-height: 56px;
   --table-min-width: 360px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --surface: #f7f7f9;
+    --raised: #ececf0;
+    --line: #e2e2e7;
+    --line-2: #d2d2d9;
+    --text: #18181b;
+    --muted: #5f5f6a;
+    --faint: #6e6e78;
+    --accent: #6d4fd8;
+    --accent-bg: rgba(109, 79, 216, 0.1);
+    --green: #15803d;
+    --amber: #b45309;
+    --red: #dc2626;
+    --on-amber: #ffffff;
+    --white: #fff;
+    --red-soft: #b91c1c;
+    --amber-text: #92400e;
+    --red-text-soft: #991b1b;
+    --red-text: #b91c1c;
+    --amber-line: rgba(180, 83, 9, 0.3);
+    --amber-bg: rgba(251, 191, 36, 0.12);
+    --hover-tint: rgba(0, 0, 0, 0.04);
+    --red-line-strong: rgba(220, 38, 38, 0.4);
+    --red-line: rgba(220, 38, 38, 0.25);
+    --red-bg: rgba(220, 38, 38, 0.06);
+    --red-bg-strong: rgba(220, 38, 38, 0.1);
+    --backdrop: rgba(0, 0, 0, 0.35);
+    --shadow: rgba(0, 0, 0, 0.18);
+  }
 }
 
 * {
@@ -1234,6 +1267,51 @@ button:disabled {
 .agent-filter[aria-pressed='true'] {
   background: var(--raised);
   color: var(--text);
+}
+
+.segmented {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--bg);
+}
+
+.segmented-option {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.segmented-option:hover {
+  color: var(--text);
+}
+
+.segmented-option:has(input:checked) {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.segmented-option:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.segmented-option:has(input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.segmented-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .agent-filter-count {

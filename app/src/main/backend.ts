@@ -27,10 +27,16 @@ import {
   type UninstallResult,
   type UpdateRegistryRequest,
   MAX_REGISTRY_NAME_LENGTH,
+  type Theme,
 } from '../shared/ipc'
 import { canonicalizeRegistryUrl } from '../shared/registryUrl'
 import { DEFAULT_REGISTRY } from './config'
-import { getAutoDownloadAppUpdates, setAutoDownloadAppUpdates } from './appSettings'
+import {
+  getAutoDownloadAppUpdates,
+  getTheme,
+  setAutoDownloadAppUpdates,
+  setTheme,
+} from './appSettings'
 import { openDatabase } from './db/open'
 import { aggregateSyncStatus, readCatalogue, registrySyncStatusFromMarker } from './catalogue'
 import { detectDefaultBranch, isGitAvailable } from './mirror/git'
@@ -110,6 +116,8 @@ export interface BackendOptions {
 export interface Backend extends AppApi {
   getAutoDownloadAppUpdates(): boolean
   setAutoDownloadAppUpdates(enabled: boolean): void
+  getTheme(): Theme
+  setTheme(theme: Theme): void
   isBusy(): boolean
   /** Refresh all enabled Registries; returns the aggregate status. */
   syncNow(): Promise<SyncStatus>
@@ -559,6 +567,8 @@ export function createBackend(options: BackendOptions): Backend {
     telemetry,
     getAutoDownloadAppUpdates: () => getAutoDownloadAppUpdates(db),
     setAutoDownloadAppUpdates: (enabled) => setAutoDownloadAppUpdates(db, enabled),
+    getTheme: () => getTheme(db),
+    setTheme: (theme) => setTheme(db, theme),
     isBusy,
 
     async syncNow(): Promise<SyncStatus> {

@@ -15,6 +15,7 @@ import type {
 } from '../../shared/ipc'
 import { deriveInstallWork, runBulkInstall } from './bulkInstall'
 import { runBulkUpdate } from './bulkUpdate'
+import { AppearanceSettings } from './AppearanceSettings'
 import { AppUpdateSettings } from './AppUpdateSettings'
 import { AppUpdateBanner } from './AppUpdateBanner'
 import { useAppUpdate } from './useAppUpdate'
@@ -780,6 +781,7 @@ export function App({ api }: AppProps): JSX.Element {
 
         {settingsOpen ? (
           <SettingsView
+            appearanceSettings={<AppearanceSettings api={api} />}
             appUpdateSettings={<AppUpdateSettings api={api} state={appUpdate.state} />}
             registries={registries}
             agents={agents}

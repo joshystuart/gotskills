@@ -142,6 +142,8 @@ function fakeApi(
     readSkillFile: vi.fn().mockResolvedValue({ path: '', sizeBytes: 0, kind: 'missing' }),
     showRegistryMenu: vi.fn().mockResolvedValue(null),
     checkAppUpdate: vi.fn().mockResolvedValue(undefined),
+    getAppearance: vi.fn().mockResolvedValue({ theme: 'dark' }),
+    setTheme: vi.fn().mockResolvedValue(undefined),
     getAutoDownloadAppUpdates: vi.fn().mockResolvedValue(true),
     setAutoDownloadAppUpdates: vi.fn().mockResolvedValue(undefined),
     getAppUpdateState: vi.fn().mockResolvedValue({ kind: 'idle', currentVersion: '0.0.6' }),
@@ -4218,6 +4220,62 @@ describe('App Update banner', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }))
     expect(api.restartForAppUpdate).toHaveBeenCalledOnce()
     expect(screen.getByRole('region', { name: 'App Update' })).toBeInTheDocument()
+  })
+})
+
+describe('Settings Appearance', () => {
+  function themeOption(name: string): HTMLElement {
+    const section = screen.getByRole('region', { name: 'Appearance' })
+    return within(within(section).getByRole('radiogroup', { name: 'Theme' })).getByRole('radio', {
+      name,
+    })
+  }
+
+  it('is the first Settings section and shows Dark with nothing stored', async () => {
+    render(<App api={fakeApi(syncStatus())} />)
+    await openSettings()
+    const settings = screen.getByRole('main', { name: 'Settings' })
+    expect(within(settings).getAllByRole('region')[0]).toHaveAccessibleName('Appearance')
+    expect(themeOption('Dark')).toBeChecked()
+    expect(themeOption('Light')).not.toBeChecked()
+    expect(themeOption('System')).not.toBeChecked()
+  })
+
+  it('saves and selects Light when chosen', async () => {
+    const api = fakeApi(syncStatus())
+    render(<App api={api} />)
+    await openSettings()
+    await act(async () => {
+      fireEvent.click(themeOption('Light'))
+    })
+    expect(api.setTheme).toHaveBeenCalledWith('light')
+    expect(themeOption('Light')).toBeChecked()
+  })
+
+  it('shows the stored theme', async () => {
+    render(
+      <App
+        api={fakeApi(syncStatus(), [], {
+          getAppearance: vi.fn().mockResolvedValue({ theme: 'system' }),
+        })}
+      />
+    )
+    await openSettings()
+    expect(themeOption('System')).toBeChecked()
+  })
+
+  it('shows an error under Appearance when saving fails', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      setTheme: vi.fn().mockRejectedValue(new Error('disk full')),
+    })
+    render(<App api={api} />)
+    await openSettings()
+    await act(async () => {
+      fireEvent.click(themeOption('Light'))
+    })
+    const section = screen.getByRole('region', { name: 'Appearance' })
+    expect(within(section).getByRole('alert')).toHaveTextContent('disk full')
+    expect(themeOption('Dark')).toBeChecked()
   })
 })
 

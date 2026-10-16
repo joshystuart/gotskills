@@ -1,7 +1,7 @@
 import { autoUpdater } from 'electron-updater'
 import { createAppUpdate } from './appUpdate'
 import { registerAppUpdateIpc } from './appUpdateIpc'
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { registerIpc } from './ipc'
@@ -9,6 +9,7 @@ import { createRegistryMenu, registerRegistryMenuIpc } from './registryMenu'
 import { createBackend } from './backend'
 import { isGitAvailable } from './mirror/git'
 import { IpcEvent } from '../shared/ipc'
+import { createThemeController, registerAppearanceIpc } from './theme'
 import { registerRendererProtocol, rendererEntryUrl } from './rendererProtocol'
 
 function devAppIcon(): string | undefined {
@@ -16,14 +17,14 @@ function devAppIcon(): string | undefined {
   return existsSync(iconPath) ? iconPath : undefined
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(backgroundColor: string): BrowserWindow {
   const win = new BrowserWindow({
     width: 1180,
     height: 760,
     minWidth: 1000,
     minHeight: 560,
     show: false,
-    backgroundColor: '#0e1015',
+    backgroundColor,
     icon: devAppIcon(),
     titleBarStyle: 'hiddenInset',
     webPreferences: {
@@ -100,6 +101,14 @@ app.whenReady().then(async () => {
     onState: (state) => win?.webContents.send(IpcEvent.appUpdateState, state),
     log: (error) => console.error('App Update:', error),
   })
+  const theme = createThemeController({
+    nativeTheme,
+    getTheme: backend.getTheme,
+    setTheme: backend.setTheme,
+  })
+  theme.apply()
+  nativeTheme.on('updated', () => win?.setBackgroundColor(theme.backgroundColor()))
+  registerAppearanceIpc(ipcMain, theme)
   registerAppUpdateIpc(ipcMain, appUpdate)
   registerIpc(ipcMain, backend)
   registerRegistryMenuIpc(
@@ -108,7 +117,7 @@ app.whenReady().then(async () => {
     () => win
   )
 
-  win = createWindow()
+  win = createWindow(theme.backgroundColor())
 
   win.webContents.on('did-finish-load', () => {
     void (async () => {
@@ -119,7 +128,7 @@ app.whenReady().then(async () => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      win = createWindow()
+      win = createWindow(theme.backgroundColor())
     }
   })
 
