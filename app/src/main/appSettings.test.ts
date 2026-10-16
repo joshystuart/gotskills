@@ -1,43 +1,38 @@
 import { describe, expect, it } from 'vitest'
-import { getFontSize, getTheme, setFontSize, setTheme } from './appSettings'
+import { getAppearance, setAppearance } from './appSettings'
 import { openDatabase } from './db/open'
 
-describe('theme setting', () => {
-  it('reads as dark with nothing stored', () => {
-    expect(getTheme(openDatabase(':memory:'))).toBe('dark')
+describe('appearance setting', () => {
+  it('reads Dark and Default when nothing is stored', () => {
+    expect(getAppearance(openDatabase(':memory:'))).toEqual({ theme: 'dark', fontSize: 'default' })
   })
 
-  it('round-trips each stored theme', () => {
+  it.each(['system', 'light', 'dark'] as const)('round-trips the %s theme', (theme) => {
     const db = openDatabase(':memory:')
-    for (const theme of ['light', 'system', 'dark'] as const) {
-      setTheme(db, theme)
-      expect(getTheme(db)).toBe(theme)
-    }
+    setAppearance(db, { theme })
+    expect(getAppearance(db)).toEqual({ theme, fontSize: 'default' })
   })
 
-  it('reads an unknown stored value as dark', () => {
+  it.each(['small', 'default', 'large', 'larger'] as const)(
+    'round-trips the %s font size',
+    (fontSize) => {
+      const db = openDatabase(':memory:')
+      setAppearance(db, { fontSize })
+      expect(getAppearance(db)).toEqual({ theme: 'dark', fontSize })
+    }
+  )
+
+  it('leaves the other value alone on a partial save', () => {
+    const db = openDatabase(':memory:')
+    setAppearance(db, { theme: 'light', fontSize: 'large' })
+    setAppearance(db, { fontSize: 'small' })
+    expect(getAppearance(db)).toEqual({ theme: 'light', fontSize: 'small' })
+  })
+
+  it('reads unknown stored values as the defaults', () => {
     const db = openDatabase(':memory:')
     db.prepare("INSERT INTO app_setting (key, value) VALUES ('theme', 'sepia')").run()
-    expect(getTheme(db)).toBe('dark')
-  })
-})
-
-describe('font size setting', () => {
-  it('reads as default with nothing stored', () => {
-    expect(getFontSize(openDatabase(':memory:'))).toBe('default')
-  })
-
-  it('round-trips each stored font size', () => {
-    const db = openDatabase(':memory:')
-    for (const size of ['small', 'large', 'larger', 'default'] as const) {
-      setFontSize(db, size)
-      expect(getFontSize(db)).toBe(size)
-    }
-  })
-
-  it('reads an unknown stored value as default', () => {
-    const db = openDatabase(':memory:')
     db.prepare("INSERT INTO app_setting (key, value) VALUES ('font-size', 'huge')").run()
-    expect(getFontSize(db)).toBe('default')
+    expect(getAppearance(db)).toEqual({ theme: 'dark', fontSize: 'default' })
   })
 })

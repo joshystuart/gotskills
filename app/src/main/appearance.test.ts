@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getFontSize, getTheme, setFontSize, setTheme } from './appSettings'
+import { getAppearance, setAppearance } from './appSettings'
 import { openDatabase } from './db/open'
 import { createAppearanceController } from './appearance'
 
@@ -24,10 +24,10 @@ function controller(stored?: string) {
   const nativeTheme = fakeNativeTheme()
   const appearance = createAppearanceController({
     nativeTheme,
-    getTheme: () => getTheme(db),
-    setTheme: (value) => setTheme(db, value),
-    getFontSize: () => getFontSize(db),
-    setFontSize: (value) => setFontSize(db, value),
+    store: {
+      getAppearance: () => getAppearance(db),
+      setAppearance: (value) => setAppearance(db, value),
+    },
   })
   return { db, nativeTheme, appearance }
 }
@@ -51,14 +51,14 @@ describe('appearance controller', () => {
     const { db, nativeTheme, appearance } = controller()
     appearance.setTheme('system')
     expect(nativeTheme.themeSource).toBe('system')
-    expect(getTheme(db)).toBe('system')
+    expect(getAppearance(db).theme).toBe('system')
     expect(appearance.get()).toEqual({ theme: 'system', fontSize: 'default' })
   })
 
   it('saves a new font size and reports it', () => {
     const { db, appearance } = controller()
     appearance.setFontSize('large')
-    expect(getFontSize(db)).toBe('large')
+    expect(getAppearance(db).fontSize).toBe('large')
     expect(appearance.get()).toEqual({ theme: 'dark', fontSize: 'large' })
   })
 
@@ -67,7 +67,7 @@ describe('appearance controller', () => {
     expect(() => appearance.setFontSize('huge' as never)).toThrow(
       'Font size must be small, default, large or larger'
     )
-    expect(getFontSize(db)).toBe('default')
+    expect(getAppearance(db).fontSize).toBe('default')
   })
 
   it('rejects an unknown theme without saving it', () => {
@@ -75,6 +75,6 @@ describe('appearance controller', () => {
     expect(() => appearance.setTheme('sepia' as never)).toThrow(
       'Theme must be system, light or dark'
     )
-    expect(getTheme(db)).toBe('dark')
+    expect(getAppearance(db).theme).toBe('dark')
   })
 })

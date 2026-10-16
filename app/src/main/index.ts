@@ -103,10 +103,7 @@ app.whenReady().then(async () => {
   })
   const appearance = createAppearanceController({
     nativeTheme,
-    getTheme: backend.getTheme,
-    setTheme: backend.setTheme,
-    getFontSize: backend.getFontSize,
-    setFontSize: backend.setFontSize,
+    store: backend,
   })
   appearance.apply()
   nativeTheme.on('updated', () => win?.setBackgroundColor(appearance.backgroundColor()))

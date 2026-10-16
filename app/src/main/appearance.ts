@@ -13,36 +13,33 @@ const BACKGROUND = { dark: '#09090b', light: '#ffffff' } as const
 
 export interface AppearanceControllerDeps {
   nativeTheme: { themeSource: Theme | string; readonly shouldUseDarkColors: boolean }
-  getTheme: () => Theme
-  setTheme: (theme: Theme) => void
-  getFontSize: () => FontSize
-  setFontSize: (fontSize: FontSize) => void
+  store: AppearanceStore
 }
 
-export function createAppearanceController({
-  nativeTheme,
-  getTheme,
-  setTheme,
-  getFontSize,
-  setFontSize,
-}: AppearanceControllerDeps) {
+/** Where the Theme and Font Size are kept. */
+export interface AppearanceStore {
+  getAppearance(): Appearance
+  setAppearance(appearance: Partial<Appearance>): void
+}
+
+export function createAppearanceController({ nativeTheme, store }: AppearanceControllerDeps) {
   return {
     apply(): void {
-      nativeTheme.themeSource = getTheme()
+      nativeTheme.themeSource = store.getAppearance().theme
     },
     get(): Appearance {
-      return { theme: getTheme(), fontSize: getFontSize() }
+      return store.getAppearance()
     },
     setTheme(theme: Theme): void {
       if (!THEMES.includes(theme)) throw new Error('Theme must be system, light or dark')
-      setTheme(theme)
+      store.setAppearance({ theme })
       nativeTheme.themeSource = theme
     },
     setFontSize(fontSize: FontSize): void {
       if (!FONT_SIZES.includes(fontSize)) {
         throw new Error('Font size must be small, default, large or larger')
       }
-      setFontSize(fontSize)
+      store.setAppearance({ fontSize })
     },
     backgroundColor(): string {
       return nativeTheme.shouldUseDarkColors ? BACKGROUND.dark : BACKGROUND.light

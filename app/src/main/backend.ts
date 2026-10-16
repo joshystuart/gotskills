@@ -27,18 +27,15 @@ import {
   type UninstallResult,
   type UpdateRegistryRequest,
   MAX_REGISTRY_NAME_LENGTH,
-  type Theme,
-  type FontSize,
+  type Appearance,
 } from '../shared/ipc'
 import { canonicalizeRegistryUrl } from '../shared/registryUrl'
 import { DEFAULT_REGISTRY } from './config'
 import {
+  getAppearance,
   getAutoDownloadAppUpdates,
-  getFontSize,
-  getTheme,
+  setAppearance,
   setAutoDownloadAppUpdates,
-  setFontSize,
-  setTheme,
 } from './appSettings'
 import { openDatabase } from './db/open'
 import { aggregateSyncStatus, readCatalogue, registrySyncStatusFromMarker } from './catalogue'
@@ -119,10 +116,8 @@ export interface BackendOptions {
 export interface Backend extends AppApi {
   getAutoDownloadAppUpdates(): boolean
   setAutoDownloadAppUpdates(enabled: boolean): void
-  getTheme(): Theme
-  setTheme(theme: Theme): void
-  getFontSize(): FontSize
-  setFontSize(fontSize: FontSize): void
+  getAppearance(): Appearance
+  setAppearance(appearance: Partial<Appearance>): void
   isBusy(): boolean
   /** Refresh all enabled Registries; returns the aggregate status. */
   syncNow(): Promise<SyncStatus>
@@ -572,10 +567,8 @@ export function createBackend(options: BackendOptions): Backend {
     telemetry,
     getAutoDownloadAppUpdates: () => getAutoDownloadAppUpdates(db),
     setAutoDownloadAppUpdates: (enabled) => setAutoDownloadAppUpdates(db, enabled),
-    getTheme: () => getTheme(db),
-    setTheme: (theme) => setTheme(db, theme),
-    getFontSize: () => getFontSize(db),
-    setFontSize: (fontSize) => setFontSize(db, fontSize),
+    getAppearance: () => getAppearance(db),
+    setAppearance: (appearance) => setAppearance(db, appearance),
     isBusy,
 
     async syncNow(): Promise<SyncStatus> {
