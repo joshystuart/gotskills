@@ -1,0 +1,1 @@
+ALTER TABLE registry ADD COLUMN colour TEXT;

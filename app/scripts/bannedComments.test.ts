@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { bannedCommentLines } from './bannedComments.mjs'
+import { bannedCommentLines, bannedRustCommentLines } from './bannedComments.mjs'
 
 const slash = '/'
 const lineComment = `${slash}${slash}`
@@ -47,6 +47,26 @@ describe('bannedCommentLines', () => {
   })
 })
 
+describe('bannedRustCommentLines', () => {
+  it.each([
+    ['a line comment', `let a = 1;\n${lineComment} note`, [2]],
+    ['a block comment', `let a = 1; ${blockOpen} note ${blockClose}`, [1]],
+  ])('flags %s', (_name, source, expected) => {
+    expect(bannedRustCommentLines(source)).toEqual(expected)
+  })
+
+  it.each([
+    ['a doc comment', `${lineComment}${slash} Docs\nfn a() {}`],
+    ['an inner doc comment', `${lineComment}! Docs\nfn a() {}`],
+    ['a string', `let a = "${lineComment} x ${blockOpen}";`],
+    ['a raw string', `let a = r#"${lineComment} "x" ${blockOpen}"#;`],
+    ['a char literal', "let a = '\"'; let b = 1;"],
+    ['a lifetime', "fn a<'a>(x: &'a str) {}"],
+  ])('does not flag %s', (_name, source) => {
+    expect(bannedRustCommentLines(source)).toEqual([])
+  })
+})
+
 describe('app source', () => {
   it('has no banned comments', () => {
     const appRoot = path.resolve(__dirname, '..')
@@ -58,6 +78,27 @@ describe('app source', () => {
       .filter(Boolean)
     const violations = files.flatMap((file) =>
       bannedCommentLines(readFileSync(path.join(appRoot, file), 'utf8')).map(
+        (line) => `${file}:${line}`
+      )
+    )
+
+    expect(violations).toEqual([])
+  })
+
+  it('has no banned comments in the Rust sources', () => {
+    const rustFiles = execFileSync(
+      'git',
+      ['ls-files', '--cached', '--others', '--exclude-standard', 'src-tauri/src'],
+      {
+        cwd: path.resolve(__dirname, '..'),
+        encoding: 'utf8',
+      }
+    )
+      .split('\n')
+      .filter((file) => file.endsWith('.rs'))
+    const root = path.resolve(__dirname, '..')
+    const violations = rustFiles.flatMap((file) =>
+      bannedRustCommentLines(readFileSync(path.join(root, file), 'utf8')).map(
         (line) => `${file}:${line}`
       )
     )

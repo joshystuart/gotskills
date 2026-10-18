@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Resvg } from '@resvg/resvg-js'
-import config from '../electron-builder.config.mjs'
+const config = { dmg: { window: { width: 660, height: 400 } } }
 
 const buildDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'build')
 const svg = readFileSync(path.join(buildDir, 'background.svg'))

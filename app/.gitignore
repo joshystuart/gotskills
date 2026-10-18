@@ -5,3 +5,5 @@ dist/
 *.log
 .tmp-test/
 test-results/
+src-tauri/target
+src-tauri/gen

@@ -19,7 +19,7 @@
   },
   "include": [
     "src",
-    "electron.vite.config.ts",
+    "vite.config.ts",
     "vitest.config.ts",
     "vitest.setup.ts",
     "scripts/**/*.test.ts"

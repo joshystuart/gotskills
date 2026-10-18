@@ -3,7 +3,7 @@ import path from 'node:path'
 import { checkDriftProblems } from './checkDrift.mjs'
 
 const repoRoot = path.resolve(__dirname, '..', '..')
-const workflow = readFileSync(path.join(repoRoot, '.github/workflows/pr-electron.yml'), 'utf8')
+const workflow = readFileSync(path.join(repoRoot, '.github/workflows/pr-tauri.yml'), 'utf8')
 const checkScript: string = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
   .scripts.check
 
@@ -24,10 +24,10 @@ describe('drift test', () => {
   })
 
   it('fails when an exempt step disappears from the workflow', () => {
-    const withoutSmoke = workflow.replace('run: scripts/smoke-packaged-cli.sh', 'run: echo skipped')
+    const withoutBuild = workflow.replace('run: npm run build', 'run: echo skipped')
 
-    expect(checkDriftProblems(withoutSmoke, `${checkScript} && echo skipped`)).toEqual([
-      'exempt command "scripts/smoke-packaged-cli.sh" no longer appears in the workflow',
+    expect(checkDriftProblems(withoutBuild, `${checkScript} && echo skipped`)).toEqual([
+      'exempt command "npm run build" no longer appears in the workflow',
     ])
   })
 })
