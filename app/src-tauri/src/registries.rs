@@ -66,7 +66,7 @@ pub fn list_registries(
         "WHERE removed_at IS NULL"
     };
     let mut stmt = conn.prepare(&format!(
-        "SELECT * FROM registry {filter} ORDER BY created_at ASC, id ASC"
+        "SELECT * FROM registry {filter} ORDER BY created_at ASC, rowid ASC"
     ))?;
     let rows = stmt.query_map([], stored_registry)?;
     rows.collect()
