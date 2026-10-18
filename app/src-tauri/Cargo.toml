@@ -1,6 +1,6 @@
 [package]
 name = "got-skills"
-version = "0.0.12"
+version = "0.0.13"
 description = "Got Skills, an internal app store for agent skills"
 authors = ["Got Skills"]
 edition = "2021"
@@ -25,6 +25,11 @@ regex = "1"
 url = "2"
 dirs = "6"
 serde_yaml = "0.9.34"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
 
 [dev-dependencies]
 tempfile = "3"

@@ -24,8 +24,8 @@ export function Toolbar({
   onRefresh,
 }: ToolbarProps): JSX.Element {
   return (
-    <header className="toolbar">
-      <h1 className="toolbar-title">
+    <header className="toolbar" data-tauri-drag-region>
+      <h1 className="toolbar-title" data-tauri-drag-region>
         {title}
         {subtitle ? (
           <>

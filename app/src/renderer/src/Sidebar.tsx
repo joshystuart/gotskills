@@ -172,8 +172,8 @@ export function Sidebar({
 
   return (
     <aside className="sidebar" aria-label="Sidebar">
-      <div className="sidebar-top">
-        <div className="brand">
+      <div className="sidebar-top" data-tauri-drag-region>
+        <div className="brand" data-tauri-drag-region>
           <img className="brand-logo" src={logoUrl} alt="" aria-hidden="true" />
           <span className="wordmark">Got Skills</span>
         </div>

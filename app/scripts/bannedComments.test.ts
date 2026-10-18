@@ -95,7 +95,7 @@ describe('app source', () => {
       }
     )
       .split('\n')
-      .filter(Boolean)
+      .filter((file) => file.endsWith('.rs'))
     const root = path.resolve(__dirname, '..')
     const violations = rustFiles.flatMap((file) =>
       bannedRustCommentLines(readFileSync(path.join(root, file), 'utf8')).map(
