@@ -398,6 +398,16 @@ export interface RendererApi extends AppApi, AppUpdateApi, AppearanceApi, Regist
   onAutoUpdateResult(cb: (result: AutoUpdateResult) => void): Unsubscribe
 }
 
+/**
+ * Tauri command contract. Each IpcRequest key maps to the snake_case Rust command of the
+ * same name (getCatalogue -> get_catalogue) invoked from api.ts. A single object argument is
+ * sent as `{ request }`; scalar arguments are sent by name: `{ id }` for removeRegistry and
+ * syncRegistry, `{ enabled }` for setAutoDownloadAppUpdates, `{ theme }` for setTheme and
+ * `{ fontSize }` for setFontSize. Commands without arguments take none. `reconcile` sends
+ * `{ request }` with a null request when omitted. Events use the IpcEvent values as event names.
+ * Failures reject with `{ kind, message, ...camelCase fields }`; kind
+ * `installation-collision` carries occupant, folderName and target.
+ */
 export const IpcRequest = {
   getAppUpdateState: 'appUpdate:getState',
   checkAppUpdate: 'appUpdate:check',

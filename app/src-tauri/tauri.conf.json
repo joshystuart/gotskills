@@ -4,7 +4,10 @@
   "version": "../package.json",
   "identifier": "com.igotskills.app",
   "build": {
-    "frontendDist": "../out/renderer"
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../out/renderer",
+    "beforeDevCommand": "npx vite",
+    "beforeBuildCommand": "npx vite build"
   },
   "app": {
     "windows": [
@@ -32,6 +35,26 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "hardenedRuntime": true,
+      "entitlements": "../build/entitlements.mac.plist",
+      "dmg": {
+        "background": "../build/background.png",
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 180,
+          "y": 200
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 200
+        }
+      }
+    }
   }
 }

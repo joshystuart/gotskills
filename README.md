@@ -38,14 +38,14 @@ _Add any Git repository as a registry. Public and private GitHub repos both work
 
 Download the latest `.dmg` from
 **[Releases](https://github.com/joshystuart/gotskills/releases)**, open it,
-and drag **Got Skills** to your Applications folder. Choose the `arm64` DMG
-for Apple Silicon (M1 and later), or the `x64` DMG for Intel.
+and drag **Got Skills** to your Applications folder. The universal DMG runs on
+Apple Silicon and Intel Macs.
 
 ---
 
 ## For developers
 
-Requires **macOS** and **Node.js 24+**.
+Requires **macOS**, **Node.js 24+** and a stable **Rust** toolchain.
 
 ```bash
 cd app
@@ -53,13 +53,13 @@ npm ci
 npm run dev          # run with hot reload
 ```
 
-| Command                 | Output                                                                              |
-| ----------------------- | ----------------------------------------------------------------------------------- |
-| `npm run build`         | Unsigned arm64 and x64 DMGs (local verify only; Gatekeeper blocks it on other Macs) |
-| `npm run build:release` | Signed + notarized arm64 and x64 DMGs (needs Apple credentials)                     |
-| `npm run package:dir`   | Unsigned `.app` in `dist/mac-arm64/` (fast; used by CI on PRs)                      |
-| `npm run typecheck`     | Type-check without emitting                                                         |
-| `npm test`              | Run the test suite                                                                  |
+| Command                 | Output                                                                    |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `npm run build`         | Unsigned `.app` and DMG (local verify only; Gatekeeper blocks other Macs) |
+| `npm run build:release` | Signed, notarized bundles plus updater artifacts (needs credentials)      |
+| `npm run typecheck`     | Type-check without emitting                                               |
+| `npm test`              | Run the renderer and script tests                                         |
+| `npm run test:rust`     | Run the Rust tests in `src-tauri`                                         |
 
 The domain vocabulary (registries, snapshots, conflicts, collisions, skill
 identity) is documented in [CONTEXT.md](CONTEXT.md) and [docs/adr/](docs/adr).

@@ -1,11 +1,6 @@
 import { parse } from 'yaml'
 
-const exemptCommands = [
-  'npm ci',
-  'npm run package:dir',
-  'scripts/check-app-size.sh',
-  'scripts/smoke-packaged-cli.sh',
-]
+const exemptCommands = ['npm ci', 'npm run build', 'scripts/check-app-size.sh']
 
 function runCommands(workflowText) {
   const { jobs } = parse(workflowText)

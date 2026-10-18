@@ -132,3 +132,63 @@ export function bannedCommentLines(source) {
 
   return lines
 }
+
+export function bannedRustCommentLines(source) {
+  const lines = []
+  let line = 1
+  let i = 0
+  let blockDepth = 0
+  while (i < source.length) {
+    const char = source[i]
+    const next = source[i + 1]
+    if (blockDepth > 0) {
+      if (char === '/' && next === '*') {
+        blockDepth++
+        i += 2
+      } else if (char === '*' && next === '/') {
+        blockDepth--
+        i += 2
+      } else {
+        if (char === '\n') line++
+        i++
+      }
+    } else if (char === '/' && next === '/') {
+      const third = source[i + 2]
+      if (third !== '/' && third !== '!') lines.push(line)
+      const end = source.indexOf('\n', i)
+      i = end === -1 ? source.length : end
+    } else if (char === '/' && next === '*') {
+      lines.push(line)
+      blockDepth = 1
+      i += 2
+    } else if (
+      char === 'r' &&
+      /^r#*"/.test(source.slice(i, i + 40)) &&
+      !/\w/.test(source[i - 1] ?? '')
+    ) {
+      const hashes = /^r(#*)"/.exec(source.slice(i, i + 40))[1]
+      const close = `"${hashes}`
+      const end = source.indexOf(close, i + 2 + hashes.length)
+      const stop = end === -1 ? source.length : end + close.length
+      line += source.slice(i, stop).split('\n').length - 1
+      i = stop
+    } else if (char === '"') {
+      i++
+      while (i < source.length && source[i] !== '"') {
+        if (source[i] === '\\') i++
+        if (source[i] === '\n') line++
+        i++
+      }
+      i++
+    } else if (
+      char === "'" &&
+      (source[i + 2] === "'" || (source[i + 1] === '\\' && source.indexOf("'", i + 2) - i < 12))
+    ) {
+      i = source.indexOf("'", source[i + 1] === '\\' ? i + 3 : i + 2) + 1
+    } else {
+      if (char === '\n') line++
+      i++
+    }
+  }
+  return lines
+}
