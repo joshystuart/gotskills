@@ -1,5 +1,7 @@
 //! The sidebar registry menu: items for a registry and how a pick is handled.
 
+#[cfg(test)]
+use crate::types::RegistrySource;
 use crate::types::{RegistryMenuAction, RegistryRecord};
 
 /// Every action the menu offers, including those the backend handles itself.
@@ -138,7 +140,7 @@ mod tests {
 
     fn registry(owner: Option<&str>, repo: Option<&str>) -> RegistryRecord {
         RegistryRecord {
-            source: "git".into(),
+            source: RegistrySource::Git,
             automatic_name: "o/r".into(),
             id: "r1".into(),
             url: "https://example.test/r1".into(),

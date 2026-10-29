@@ -90,9 +90,7 @@ impl Backend {
         };
         let desired: BTreeMap<_, _> = registries
             .into_iter()
-            .filter(|registry| {
-                registry.source == "local" && registry.enabled && registry.removed_at.is_none()
-            })
+            .filter(|registry| registry.is_watchable())
             .map(|registry| (registry.id, PathBuf::from(registry.url)))
             .collect();
         let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
@@ -109,9 +107,7 @@ impl Backend {
 
     fn sync_watched_registry(&self, id: &str) {
         let registry = get_registry(&self.db(), id).ok().flatten();
-        if let Some(registry) = registry.filter(|registry| {
-            registry.source == "local" && registry.enabled && registry.removed_at.is_none()
-        }) {
+        if let Some(registry) = registry.filter(|registry| registry.is_watchable()) {
             let _ = self.do_sync_pending(&registry, true);
             self.events.catalogue_updated();
             self.emit_status();

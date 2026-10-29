@@ -6,6 +6,7 @@
 //! only ever locked for short sections, and syncs write through their own
 //! connection so reads stay responsive during a fetch.
 
+use crate::types::RegistrySource;
 pub mod app_update;
 pub mod appearance;
 mod local_watch;
@@ -276,7 +277,7 @@ impl Backend {
         let _ = insert_registry(
             &self.db(),
             &InsertRegistryInput {
-                source: "git".into(),
+                source: RegistrySource::Git,
                 url: DEFAULT_REGISTRY.url.to_string(),
                 branch: DEFAULT_REGISTRY.branch.to_string(),
                 enabled: true,
@@ -352,7 +353,7 @@ impl Backend {
     }
 
     fn automatic_registry_name(&self, registry: &StoredRegistry) -> String {
-        if registry.source != "local" {
+        if registry.source != RegistrySource::Local {
             return crate::registries::automatic_registry_name(registry);
         }
         let home = std::fs::canonicalize(&self.environment.home)
@@ -372,7 +373,7 @@ impl Backend {
 
     fn to_record(&self, conn: &Connection, registry: &StoredRegistry) -> AppResult<RegistryRecord> {
         Ok(RegistryRecord {
-            source: registry.source.clone(),
+            source: registry.source,
             automatic_name: self.automatic_registry_name(registry),
             id: registry.id.clone(),
             url: registry.url.clone(),
@@ -422,7 +423,7 @@ impl Backend {
     }
 
     fn sync_locked(&self, registry: &StoredRegistry) -> AppResult<(RegistrySyncStatus, bool)> {
-        if registry.source == "git" && !is_git_available() {
+        if registry.source == RegistrySource::Git && !is_git_available() {
             let conn = self.db();
             record_sync_failure(&conn, &registry.id, SyncMarkerStatus::Offline)?;
             return Ok((
@@ -431,7 +432,7 @@ impl Backend {
             ));
         }
         let config = SyncRegistryConfig {
-            source: registry.source.clone(),
+            source: registry.source,
             registry_id: registry.id.clone(),
             url: registry.url.clone(),
             branch: registry.branch.clone(),
@@ -450,7 +451,7 @@ impl Backend {
                 self.telemetry.emit(&conn, event)?;
             }
             Err(error) => {
-                let reason = if registry.source == "local" {
+                let reason = if registry.source == RegistrySource::Local {
                     SyncFailureReason::FolderNotFound
                 } else {
                     classify_git_error(&redact_git_error(&error.message))
@@ -498,9 +499,8 @@ impl Backend {
         };
         let refreshed;
         let registry = if follow_up {
-            refreshed = get_registry(&self.db(), &registry.id)?.filter(|registry| {
-                registry.source == "local" && registry.enabled && registry.removed_at.is_none()
-            });
+            refreshed =
+                get_registry(&self.db(), &registry.id)?.filter(|registry| registry.is_watchable());
             let Some(registry) = refreshed.as_ref() else {
                 return self.registry_status(&self.db(), &registry.id);
             };
@@ -794,7 +794,7 @@ impl Backend {
         let conn = self.db();
         let registry =
             get_registry(&conn, id)?.ok_or_else(|| AppError::not_found("Registry not found"))?;
-        if registry.source == "local" {
+        if registry.source == RegistrySource::Local {
             return get_marker(&conn, id)?
                 .and_then(|marker| marker.last_sync_revision)
                 .ok_or_else(|| AppError::failed("Registry has no snapshot"));
@@ -1043,7 +1043,11 @@ impl Backend {
         let stored = insert_registry(
             &self.db(),
             &InsertRegistryInput {
-                source: if local { "local" } else { "git" }.into(),
+                source: if local {
+                    RegistrySource::Local
+                } else {
+                    RegistrySource::Git
+                },
                 url: canonical.url,
                 branch,
                 enabled: request.enabled.unwrap_or(true),
@@ -1102,10 +1106,14 @@ impl Backend {
                         clash.id
                     )));
                 }
-                fields.source = Some(if local { "local" } else { "git" }.into());
+                fields.source = Some(if local {
+                    RegistrySource::Local
+                } else {
+                    RegistrySource::Git
+                });
                 if local {
                     fields.branch = Some(String::new());
-                } else if current.source == "local" {
+                } else if current.source == RegistrySource::Local {
                     fields.branch =
                         Some(self.registry_branch(request.branch.as_deref(), &canonical.url)?);
                 }
@@ -1114,7 +1122,7 @@ impl Backend {
                 fields.github_repo = Some(canonical.github_repo);
                 fields.canonical_key = Some(canonical.canonical_key);
             }
-            if fields.source.as_deref().unwrap_or(&current.source) == "git" {
+            if fields.source.unwrap_or(current.source) == RegistrySource::Git {
                 if let Some(branch) = request
                     .branch
                     .as_deref()

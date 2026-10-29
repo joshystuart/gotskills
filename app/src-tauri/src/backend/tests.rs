@@ -1,3 +1,4 @@
+use crate::types::RegistrySource;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1052,7 +1053,7 @@ fn local_registry_snapshots_without_git() {
             .unwrap()
     });
     assert_eq!(calls, 0);
-    assert_eq!(registry.source, "local");
+    assert_eq!(registry.source, RegistrySource::Local);
     assert_eq!(registry.branch, "");
     assert_eq!(folders(&h.backend), vec!["alpha"]);
 }
@@ -1181,7 +1182,7 @@ fn registry_switches_between_git_and_local_preserving_settings() {
     change.url = Some("~/drafts".into());
     change.branch = Some("ignored-for-local".into());
     let local = h.backend.update_registry(&change).unwrap();
-    assert_eq!(local.source, "local");
+    assert_eq!(local.source, RegistrySource::Local);
     assert_eq!(local.branch, "");
     assert_eq!(folders(&h.backend), vec!["draft"]);
     assert_eq!(local.id, registry.id);
@@ -1191,7 +1192,7 @@ fn registry_switches_between_git_and_local_preserving_settings() {
     change.url = Some(format!("file://{}", remote.path().display()));
     change.branch = None;
     let git = h.backend.update_registry(&change).unwrap();
-    assert_eq!(git.source, "git");
+    assert_eq!(git.source, RegistrySource::Git);
     assert_eq!(git.branch, "main");
     assert_eq!(folders(&h.backend), vec!["published"]);
     assert_eq!(git.id, registry.id);
@@ -1240,7 +1241,7 @@ fn registry_source_switch_rejects_duplicates_and_unsafe_folders_without_changes(
             .contains("cannot be"));
     }
     let unchanged = h.backend.registry(&registry.id).unwrap();
-    assert_eq!(unchanged.source, "git");
+    assert_eq!(unchanged.source, RegistrySource::Git);
     assert_eq!(unchanged.url, registry.url);
     assert_eq!(unchanged.branch, registry.branch);
     assert_eq!(folders(&h.backend), vec!["published"]);
@@ -1252,7 +1253,10 @@ fn registry_source_switch_rejects_duplicates_and_unsafe_folders_without_changes(
         .unwrap_err()
         .to_string()
         .contains("already configured"));
-    assert_eq!(h.backend.registry(&local.id).unwrap().source, "local");
+    assert_eq!(
+        h.backend.registry(&local.id).unwrap().source,
+        RegistrySource::Local
+    );
 }
 
 #[test]
@@ -1280,7 +1284,7 @@ fn local_registry_switch_uses_the_requested_git_branch() {
     change.url = Some(format!("file://{}", source.path().display()));
     change.branch = Some("draft".into());
     let registry = h.backend.update_registry(&change).unwrap();
-    assert_eq!(registry.source, "git");
+    assert_eq!(registry.source, RegistrySource::Git);
     assert_eq!(registry.branch, "draft");
     assert_eq!(folders(&h.backend), vec!["preview", "published"]);
 }
@@ -1325,6 +1329,48 @@ fn missing_local_folder_keeps_snapshot_and_recovers() {
     assert_eq!(recovered.reason, None);
     assert_eq!(recovered.folder_path, None);
     assert!(!h.backend.get_catalogue().unwrap().skills[0].stale);
+}
+
+#[test]
+fn unreadable_nested_local_skill_keeps_catalogue_stale_until_recovery() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(
+        &folder,
+        "skills/alpha",
+        Some("name: alpha\ndescription: Draft"),
+    );
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: "~/drafts".into(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    for path in [
+        folder.join("skills/alpha"),
+        folder.join("skills/alpha/SKILL.md"),
+    ] {
+        let permissions = fs::metadata(&path).unwrap().permissions();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = h.backend.sync_registry(&registry.id);
+        fs::set_permissions(&path, permissions).unwrap();
+        let status = result.unwrap();
+        assert_eq!(
+            serde_json::to_value(&status).unwrap()["reason"],
+            "folder-not-found"
+        );
+        assert_eq!(status.stale, Some(true));
+        assert_eq!(status.revision, registry.sync_status.revision);
+        assert_eq!(folders(&h.backend), vec!["alpha"]);
+        assert!(h.backend.get_catalogue().unwrap().skills[0].stale);
+        let recovered = h.backend.sync_registry(&registry.id).unwrap();
+        assert_eq!(recovered.stale, Some(false));
+    }
 }
 
 #[test]

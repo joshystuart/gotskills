@@ -3,6 +3,14 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The closed set of Registry sources, shared by storage, sync and IPC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RegistrySource {
+    Git,
+    Local,
+}
+
 /// Longest Registry Name allowed, after trimming.
 pub const MAX_REGISTRY_NAME_LENGTH: usize = 40;
 
@@ -168,7 +176,7 @@ pub struct CatalogueSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryRecord {
-    pub source: String,
+    pub source: RegistrySource,
     pub automatic_name: String,
     pub id: String,
     pub url: String,

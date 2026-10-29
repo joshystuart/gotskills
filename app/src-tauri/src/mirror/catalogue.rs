@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::types::RegistrySource;
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
@@ -447,7 +449,7 @@ mod tests {
         insert_registry(
             conn,
             &InsertRegistryInput {
-                source: "git".into(),
+                source: RegistrySource::Git,
                 url: format!("https://github.com/o/{key}"),
                 branch: "main".into(),
                 enabled: true,

@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::types::RegistrySource;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -350,7 +352,7 @@ mod tests {
             let registry = insert_registry(
                 &conn,
                 &InsertRegistryInput {
-                    source: "git".into(),
+                    source: RegistrySource::Git,
                     url: "https://github.com/example/skills".into(),
                     branch: "main".into(),
                     enabled: true,

@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 use sha2::{Digest, Sha256};
 
-use super::discovery::skills::{discover_skills, DiscoverSkillsOptions};
+use super::discovery::skills::{discover_skills, parse_skill_md, DiscoverSkillsOptions};
 use super::scan::{locale_compare, ScannedSkill};
 use crate::installer::copy::{copy_tree, paths_overlap};
 
@@ -68,21 +68,30 @@ pub fn snapshot_local(source: &Path, destination: &Path) -> io::Result<LocalSnap
     let staging = destination.with_extension(format!("snapshot-{suffix}"));
     let result = (|| {
         fs::create_dir(&staging)?;
-        let discovered = discover_skills(source, None, DiscoverSkillsOptions::default())
-            .map_err(io::Error::other)?;
+        let discovered = discover_skills(
+            source,
+            None,
+            DiscoverSkillsOptions {
+                strict_io: true,
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
         let mut skills = Vec::new();
         for skill in discovered {
             let relative = skill.path.strip_prefix(source).map_err(io::Error::other)?;
             let copied = staging.join(relative);
             copy_tree(&skill.path, &copied, true)?;
+            let metadata = parse_skill_md(&copied.join("SKILL.md"), false)
+                .ok_or_else(|| io::Error::other("Skill metadata changed during snapshot"))?;
             let mut hash = Sha256::new();
             let updated = hash_tree(&copied, &copied, &mut hash)?;
             let content_hash = format!("{:x}", hash.finalize());
             skills.push(ScannedSkill {
-                id: skill.name.clone(),
+                id: metadata.name.clone(),
                 skill_path: relative.to_string_lossy().replace('\\', "/"),
-                name: skill.name,
-                description: skill.description,
+                name: metadata.name,
+                description: metadata.description,
                 provenance_sha: content_hash[..7].to_string(),
                 content_hash,
                 updated_at: chrono::DateTime::<chrono::Utc>::from(updated)
@@ -309,6 +318,98 @@ mod tests {
         }
         assert!(!destination.join("broken").exists());
         assert!(!destination.join(".git").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_nested_skill_keeps_the_last_snapshot() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, "skills/alpha", "alpha");
+        snapshot_local(&source, &destination).unwrap();
+        let before = fs::read(destination.join("skills/alpha/SKILL.md")).unwrap();
+        let path = source.join("skills/alpha");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = snapshot_local(&source, &destination);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read(destination.join("skills/alpha/SKILL.md")).unwrap(),
+            before
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_nested_skill_metadata_keeps_the_last_snapshot() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, "skills/alpha", "alpha");
+        snapshot_local(&source, &destination).unwrap();
+        let before = fs::read(destination.join("skills/alpha/SKILL.md")).unwrap();
+        let path = source.join("skills/alpha/SKILL.md");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = snapshot_local(&source, &destination);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read(destination.join("skills/alpha/SKILL.md")).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn concurrent_saves_publish_metadata_matching_the_snapshot() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, ".", "alpha");
+        let running = Arc::new(AtomicBool::new(true));
+        let save = running.clone();
+        let path = source.clone();
+        let writer = std::thread::spawn(move || {
+            let mut count = 0;
+            while save.load(Ordering::Relaxed) {
+                let name = if count % 2 == 0 { "alpha" } else { "beta" };
+                fs::write(
+                    path.parent().unwrap().join("next.md"),
+                    format!("---\nname: {name}\ndescription: {name}\n---\nBody"),
+                )
+                .unwrap();
+                fs::rename(
+                    path.parent().unwrap().join("next.md"),
+                    path.join("SKILL.md"),
+                )
+                .unwrap();
+                count += 1;
+            }
+        });
+        let mut mismatch = None;
+        for _ in 0..100 {
+            let snapshot = snapshot_local(&source, &destination).unwrap();
+            let copied = super::super::discovery::skills::parse_skill_md(
+                &destination.join("SKILL.md"),
+                false,
+            )
+            .unwrap();
+            if snapshot.skills[0].name != copied.name
+                || snapshot.skills[0].description != copied.description
+            {
+                mismatch = Some((snapshot.skills[0].clone(), copied));
+                break;
+            }
+        }
+        running.store(false, Ordering::Relaxed);
+        writer.join().unwrap();
+        assert!(mismatch.is_none(), "{mismatch:?}");
     }
 
     #[test]

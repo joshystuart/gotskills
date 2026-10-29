@@ -64,6 +64,7 @@ pub struct Skill {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DiscoverSkillsOptions {
     pub include_internal: bool,
+    pub strict_io: bool,
     pub full_depth: bool,
     pub include_duplicate_names: bool,
 }
@@ -167,6 +168,14 @@ pub fn parse_skill_md(skill_md_path: &Path, include_internal: bool) -> Option<Sk
         }
     };
 
+    parse_skill_content(skill_md_path, include_internal, content)
+}
+
+fn parse_skill_content(
+    skill_md_path: &Path,
+    include_internal: bool,
+    content: String,
+) -> Option<Skill> {
     let data = match parse_frontmatter(&content) {
         Ok(parsed) => parsed.data,
         Err(error) => {
@@ -234,33 +243,21 @@ pub fn parse_skill_md(skill_md_path: &Path, include_internal: bool) -> Option<Sk
 
 /// Directory entries sorted by name (Node's `readdir` is `alphasort`ed), with
 /// the entry type taken without following symlinks.
-fn sorted_entries(dir: &Path) -> Option<Vec<(String, fs::FileType)>> {
-    let mut entries: Vec<(String, fs::FileType)> = fs::read_dir(dir)
-        .ok()?
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let file_type = entry.file_type().ok()?;
-            Some((entry.file_name().to_string_lossy().to_string(), file_type))
-        })
-        .collect();
+fn sorted_entries(dir: &Path, strict: bool) -> std::io::Result<Vec<(String, fs::FileType)>> {
+    let entries = fs::read_dir(dir)?.map(|entry| {
+        let entry = entry?;
+        Ok((
+            entry.file_name().to_string_lossy().to_string(),
+            entry.file_type()?,
+        ))
+    });
+    let mut entries: Vec<_> = if strict {
+        entries.collect::<std::io::Result<_>>()?
+    } else {
+        entries.filter_map(Result::ok).collect()
+    };
     entries.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-    Some(entries)
-}
-
-fn find_skill_dirs(dir: &Path, depth: usize, max_depth: usize) -> Vec<PathBuf> {
-    if depth > max_depth {
-        return Vec::new();
-    }
-    let mut found = Vec::new();
-    if has_skill_md(dir) {
-        found.push(dir.to_path_buf());
-    }
-    for (name, file_type) in sorted_entries(dir).unwrap_or_default() {
-        if file_type.is_dir() && !SKIP_DIRS.contains(&name.as_str()) {
-            found.extend(find_skill_dirs(&dir.join(&name), depth + 1, max_depth));
-        }
-    }
-    found
+    Ok(entries)
 }
 
 /// Whether `subpath` stays within `base_path` once resolved.
@@ -270,6 +267,7 @@ pub fn is_subpath_safe(base_path: &Path, subpath: &str) -> bool {
 
 struct Discovery<'a> {
     base_path: &'a Path,
+    io_error: Option<std::io::Error>,
     options: DiscoverSkillsOptions,
     skills: Vec<Skill>,
     seen_names: HashSet<String>,
@@ -279,6 +277,49 @@ struct Discovery<'a> {
 }
 
 impl Discovery<'_> {
+    fn read<T>(&mut self, result: std::io::Result<T>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(error) => {
+                if self.options.strict_io && error.kind() != std::io::ErrorKind::NotFound {
+                    self.io_error.get_or_insert(error);
+                }
+                None
+            }
+        }
+    }
+
+    fn has_skill(&mut self, dir: &Path) -> bool {
+        self.read(fs::metadata(dir.join("SKILL.md")))
+            .is_some_and(|metadata| metadata.is_file())
+    }
+
+    fn find_skill_dirs(&mut self, dir: &Path, depth: usize, max_depth: usize) -> Vec<PathBuf> {
+        if depth > max_depth {
+            return Vec::new();
+        }
+        let mut found = Vec::new();
+        if self.has_skill(dir) {
+            found.push(dir.to_path_buf());
+        }
+        for (name, file_type) in self
+            .read(sorted_entries(dir, self.options.strict_io))
+            .unwrap_or_default()
+        {
+            if file_type.is_dir() && !SKIP_DIRS.contains(&name.as_str()) {
+                found.extend(self.find_skill_dirs(&dir.join(&name), depth + 1, max_depth));
+            }
+        }
+        found
+    }
+
+    fn finish(self) -> Result<Vec<Skill>, String> {
+        match self.io_error {
+            Some(error) => Err(error.to_string()),
+            None => Ok(self.skills),
+        }
+    }
+
     fn enhance(&self, mut skill: Skill) -> Skill {
         if let Some(name) = self.plugin_groupings.get(&resolve(&skill.path)) {
             skill.plugin_name = Some(name.clone());
@@ -314,11 +355,29 @@ impl Discovery<'_> {
         if !self.parsed_skill_paths.insert(skill_md_path.clone()) {
             return None;
         }
-        parse_skill_md(&skill_md_path, self.options.include_internal)
+        if self.options.strict_io {
+            let bytes = match fs::read(&skill_md_path) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    self.io_error.get_or_insert(error);
+                    return None;
+                }
+            };
+            let content = match String::from_utf8(bytes) {
+                Ok(content) => content,
+                Err(error) => {
+                    warn_skipped_skill(&skill_md_path, &format!("failed to read file: {error}"));
+                    return None;
+                }
+            };
+            parse_skill_content(&skill_md_path, self.options.include_internal, content)
+        } else {
+            parse_skill_md(&skill_md_path, self.options.include_internal)
+        }
     }
 
     fn try_add_skill_at(&mut self, skill_dir: &Path) -> bool {
-        if !has_skill_md(skill_dir) {
+        if !self.has_skill(skill_dir) {
             return false;
         }
         let Some(skill) = self.parse_skill_at(skill_dir) else {
@@ -337,7 +396,7 @@ impl Discovery<'_> {
     }
 
     fn walk_skill_dirs(&mut self, dir: &Path, max_depth: usize, depth: usize) {
-        let Some(entries) = sorted_entries(dir) else {
+        let Some(entries) = self.read(sorted_entries(dir, self.options.strict_io)) else {
             return;
         };
         for (name, file_type) in entries {
@@ -357,7 +416,7 @@ impl Discovery<'_> {
 /// Discover skills under `base_path` (optionally below `subpath`) using the
 /// vercel-labs/skills rules: a root SKILL.md, priority container directories
 /// (walked up to three levels), plugin-manifest directories, then a full walk
-/// when nothing was found. Errors only for an unsafe `subpath`.
+/// when nothing was found. Strict I/O also reports filesystem access errors.
 pub fn discover_skills(
     base_path: &Path,
     subpath: Option<&str>,
@@ -377,6 +436,7 @@ pub fn discover_skills(
 
     let mut discovery = Discovery {
         base_path,
+        io_error: None,
         options,
         skills: Vec::new(),
         seen_names: HashSet::new(),
@@ -388,14 +448,14 @@ pub fn discover_skills(
         plugin_groupings: get_plugin_groupings(&search_path),
     };
 
-    if has_skill_md(&search_path) {
+    if discovery.has_skill(&search_path) {
         if let Some(skill) = discovery.parse_skill_at(&search_path) {
             if !discovery.is_installed_project_skill(&skill) {
                 let skill = discovery.enhance(skill);
                 discovery.seen_names.insert(skill.name.clone());
                 discovery.skills.push(skill);
                 if !options.full_depth {
-                    return Ok(discovery.skills);
+                    return discovery.finish();
                 }
             }
         }
@@ -429,7 +489,7 @@ pub fn discover_skills(
     }
 
     if discovery.skills.is_empty() || options.full_depth {
-        for skill_dir in find_skill_dirs(&search_path, 0, 5) {
+        for skill_dir in discovery.find_skill_dirs(&search_path, 0, 5) {
             let Some(skill) = discovery.parse_skill_at(&skill_dir) else {
                 continue;
             };
@@ -443,7 +503,7 @@ pub fn discover_skills(
         }
     }
 
-    Ok(discovery.skills)
+    discovery.finish()
 }
 
 /// A skill's display name: its name, else its directory name.

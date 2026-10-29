@@ -1,3 +1,4 @@
+use crate::types::RegistrySource;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -13,7 +14,7 @@ use super::scan::{scan_skills, ScannedSkill};
 /// Inputs for syncing one registry.
 #[derive(Debug, Clone)]
 pub struct SyncRegistryConfig {
-    pub source: String,
+    pub source: RegistrySource,
     pub registry_id: String,
     pub url: String,
     pub branch: String,
@@ -125,7 +126,7 @@ pub fn sync_registry(
     conn: &Connection,
     config: &SyncRegistryConfig,
 ) -> Result<SyncWriteResult, GitError> {
-    if config.source == "local" {
+    if config.source == RegistrySource::Local {
         let snapshot =
             super::local::snapshot_local(std::path::Path::new(&config.url), &config.mirror_path)?;
         let marker = get_marker(conn, &config.registry_id).map_err(|error| GitError {
@@ -233,7 +234,7 @@ mod tests {
         insert_registry(
             conn,
             &InsertRegistryInput {
-                source: "git".into(),
+                source: RegistrySource::Git,
                 url: url.to_string(),
                 branch: "main".into(),
                 enabled: true,
@@ -259,7 +260,7 @@ mod tests {
         let url = format!("file://{}", remote.display());
         let registry_id = seed_registry(&conn, &url);
         let config = SyncRegistryConfig {
-            source: "git".into(),
+            source: RegistrySource::Git,
             registry_id,
             url,
             branch: "main".into(),
@@ -345,7 +346,7 @@ mod tests {
         let fx = fixture(remote.path());
         sync_registry(&fx.conn, &fx.config).unwrap();
         let broken = SyncRegistryConfig {
-            source: "git".into(),
+            source: RegistrySource::Git,
             url: format!("file://{}", fx._work.path().join("missing").display()),
             ..fx.config.clone()
         };
@@ -641,7 +642,7 @@ mod tests {
         sync_registry(&fx.conn, &fx.config).unwrap();
 
         let broken = SyncRegistryConfig {
-            source: "git".into(),
+            source: RegistrySource::Git,
             url: fx
                 .config
                 .mirror_path
@@ -747,7 +748,7 @@ mod local_sync_tests {
         let registry = crate::registries::insert_registry(
             &conn,
             &crate::registries::InsertRegistryInput {
-                source: "local".into(),
+                source: RegistrySource::Local,
                 url: source.to_string_lossy().into_owned(),
                 branch: String::new(),
                 enabled: true,
@@ -759,7 +760,7 @@ mod local_sync_tests {
         )
         .unwrap();
         let config = SyncRegistryConfig {
-            source: "local".into(),
+            source: RegistrySource::Local,
             registry_id: registry.id,
             url: source.to_string_lossy().into_owned(),
             branch: String::new(),

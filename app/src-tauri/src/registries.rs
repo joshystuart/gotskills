@@ -1,3 +1,4 @@
+use crate::types::RegistrySource;
 use rusqlite::{named_params, Connection, OptionalExtension, Row};
 use url::Url;
 use uuid::Uuid;
@@ -8,7 +9,7 @@ use crate::error::{AppError, AppResult};
 /// In-memory shape of a Registry row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredRegistry {
-    pub source: String,
+    pub source: RegistrySource,
     pub id: String,
     pub url: String,
     pub branch: String,
@@ -22,6 +23,38 @@ pub struct StoredRegistry {
     pub removed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl StoredRegistry {
+    /// Whether the Registry should have a local folder watch.
+    pub fn is_watchable(&self) -> bool {
+        self.source == RegistrySource::Local && self.enabled && self.removed_at.is_none()
+    }
+}
+
+impl rusqlite::types::ToSql for RegistrySource {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(match self {
+            Self::Git => "git",
+            Self::Local => "local",
+        }
+        .into())
+    }
+}
+
+impl rusqlite::types::FromSql for RegistrySource {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        match value.as_str()? {
+            "git" => Ok(Self::Git),
+            "local" => Ok(Self::Local),
+            other => Err(rusqlite::types::FromSqlError::Other(Box::new(
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Unknown Registry source: {other}"),
+                ),
+            ))),
+        }
+    }
 }
 
 /// In-memory shape of a per-Registry sync marker row.
@@ -98,7 +131,7 @@ pub fn find_by_canonical_key(
 
 #[derive(Debug, Clone)]
 pub struct InsertRegistryInput {
-    pub source: String,
+    pub source: RegistrySource,
     pub url: String,
     pub branch: String,
     pub enabled: bool,
@@ -147,7 +180,7 @@ pub fn insert_registry(
 /// inner `Option` sets or clears the value.
 #[derive(Debug, Clone, Default)]
 pub struct UpdateRegistryFields {
-    pub source: Option<String>,
+    pub source: Option<RegistrySource>,
     pub url: Option<String>,
     pub branch: Option<String>,
     pub enabled: Option<bool>,
@@ -167,7 +200,7 @@ pub fn update_registry(
     let current = get_registry(conn, id)?
         .ok_or_else(|| AppError::not_found(format!("Registry \"{id}\" not found")))?;
     let next = StoredRegistry {
-        source: fields.source.unwrap_or(current.source.clone()),
+        source: fields.source.unwrap_or(current.source),
         url: fields.url.unwrap_or(current.url.clone()),
         branch: fields.branch.unwrap_or(current.branch.clone()),
         enabled: fields.enabled.unwrap_or(current.enabled),
@@ -341,7 +374,7 @@ mod tests {
 
     fn input(key: &str) -> InsertRegistryInput {
         InsertRegistryInput {
-            source: "git".into(),
+            source: RegistrySource::Git,
             url: format!("https://github.com/o/{key}"),
             branch: "main".into(),
             enabled: true,
@@ -475,6 +508,8 @@ mod tests {
 
 #[cfg(test)]
 mod migration_source_tests {
+    use super::RegistrySource;
+
     #[test]
     fn existing_bare_paths_remain_git() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -483,7 +518,7 @@ mod migration_source_tests {
         crate::db::migrations::migrate_to(&conn, 12).unwrap();
         assert_eq!(
             super::get_registry(&conn, "old").unwrap().unwrap().source,
-            "git"
+            RegistrySource::Git
         );
     }
 }
