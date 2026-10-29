@@ -2,7 +2,7 @@
 //!
 //! [`Backend`] is synchronous: every method blocks, so callers run it through
 //! `tauri::async_runtime::spawn_blocking`. Mirror work (sync, install,
-//! uninstall) is serialised by one [`MirrorMutex`]; the database connection is
+//! uninstall) is serialised by registry-specific locks; the database connection is
 //! only ever locked for short sections, and syncs write through their own
 //! connection so reads stay responsive during a fetch.
 
@@ -164,7 +164,7 @@ pub struct Backend {
     paths: DataPaths,
     environment: Environment,
     telemetry: TelemetryLog,
-    mirror_mutex: MirrorMutex,
+    mirror_mutexes: Mutex<BTreeMap<String, Arc<MirrorMutex>>>,
     events: Arc<dyn BackendEvents>,
     runtime: Mutex<RuntimeState>,
     sync_done: Condvar,
@@ -222,7 +222,7 @@ impl Backend {
             paths,
             environment,
             telemetry,
-            mirror_mutex: MirrorMutex::new(),
+            mirror_mutexes: Mutex::new(BTreeMap::new()),
             events,
             runtime: Mutex::new(RuntimeState::default()),
             sync_done: Condvar::new(),
@@ -360,8 +360,17 @@ impl Backend {
         })
     }
 
+    fn mirror_mutex(&self, registry_id: &str) -> Arc<MirrorMutex> {
+        self.mirror_mutexes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entry(registry_id.to_string())
+            .or_insert_with(|| Arc::new(MirrorMutex::new()))
+            .clone()
+    }
+
     fn sync_exclusive(&self, registry: &StoredRegistry) -> AppResult<RegistrySyncStatus> {
-        self.mirror_mutex.run_exclusive(|| {
+        self.mirror_mutex(&registry.id).run_exclusive(|| {
             self.runtime().syncing.insert(registry.id.clone());
             self.emit_status();
             let outcome = self.sync_locked(registry);
@@ -538,10 +547,35 @@ impl Backend {
             .into_iter()
             .filter(|registry| registry.enabled)
             .collect();
-        let mut registries = Vec::new();
-        for registry in &enabled {
-            registries.push(self.do_sync(registry)?);
-        }
+        let concurrency = self.get_sync_concurrency();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let results = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..concurrency.min(enabled.len()))
+                .map(|_| {
+                    scope.spawn(|| {
+                        let mut results = Vec::new();
+                        loop {
+                            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(registry) = enabled.get(index) else {
+                                break;
+                            };
+                            results.push((index, self.do_sync(registry)));
+                        }
+                        results
+                    })
+                })
+                .collect();
+            let mut results = Vec::new();
+            for worker in workers {
+                results.extend(worker.join().unwrap());
+            }
+            results.sort_by_key(|(index, _)| *index);
+            results
+                .into_iter()
+                .map(|(_, result)| result)
+                .collect::<AppResult<Vec<_>>>()
+        });
+        let registries = results?;
         self.emit_status();
         self.events.catalogue_updated();
         Ok(SyncAllResult { registries })
@@ -675,7 +709,7 @@ impl Backend {
         only_update_available: bool,
     ) -> AppResult<Option<InstallResult>> {
         self.track_operation(|| {
-            self.mirror_mutex
+            self.mirror_mutex(&request.registry_id)
                 .run_exclusive(|| self.install_locked(request, action, only_update_available))
         })
     }
@@ -809,7 +843,7 @@ impl Backend {
                 content_hash: dimensions.content_hash,
             };
             let result = self.execute_install_lifecycle(&lifecycle, || {
-                self.mirror_mutex.run_exclusive(|| {
+                self.mirror_mutex(&request.registry_id).run_exclusive(|| {
                     let conn = self.db();
                     let removed = uninstall_skill(
                         &UninstallDeps {
@@ -1039,6 +1073,14 @@ impl Backend {
             },
             request,
         )
+    }
+
+    pub fn get_sync_concurrency(&self) -> usize {
+        app_settings::get_sync_concurrency(&self.db())
+    }
+
+    pub fn set_sync_concurrency(&self, concurrency: usize) -> AppResult<()> {
+        Ok(app_settings::set_sync_concurrency(&self.db(), concurrency)?)
     }
 
     pub fn get_auto_download_app_updates(&self) -> bool {

@@ -64,6 +64,8 @@ function subscribe<T>(event: string, cb: (payload: T) => void): Unsubscribe {
 }
 
 const api: RendererApi = {
+  getSyncConcurrency: () => call('getSyncConcurrency'),
+  setSyncConcurrency: (concurrency) => call('setSyncConcurrency', { concurrency }),
   checkAppUpdate: () => call('checkAppUpdate'),
   getAutoDownloadAppUpdates: () => call('getAutoDownloadAppUpdates'),
   setAutoDownloadAppUpdates: (enabled) => call('setAutoDownloadAppUpdates', { enabled }),

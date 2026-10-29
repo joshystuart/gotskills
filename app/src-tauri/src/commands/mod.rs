@@ -138,6 +138,22 @@ pub async fn restart_for_app_update(update: State<'_, Arc<AppUpdate>>) -> AppRes
 }
 
 #[tauri::command]
+pub async fn get_sync_concurrency(backend: State<'_, Arc<Backend>>) -> AppResult<usize> {
+    run(&backend, |backend| Ok(backend.get_sync_concurrency())).await
+}
+
+#[tauri::command]
+pub async fn set_sync_concurrency(
+    backend: State<'_, Arc<Backend>>,
+    concurrency: usize,
+) -> AppResult<()> {
+    run(&backend, move |backend| {
+        backend.set_sync_concurrency(concurrency)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn get_appearance(backend: State<'_, Arc<Backend>>) -> AppResult<Appearance> {
     run(&backend, |backend| Ok(backend.get_appearance())).await
 }

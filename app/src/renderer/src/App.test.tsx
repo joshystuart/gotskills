@@ -145,6 +145,8 @@ function fakeApi(
     getAppearance: vi.fn().mockResolvedValue({ theme: 'dark', fontSize: 'default' }),
     setTheme: vi.fn().mockResolvedValue(undefined),
     setFontSize: vi.fn().mockResolvedValue(undefined),
+    getSyncConcurrency: vi.fn().mockResolvedValue(4),
+    setSyncConcurrency: vi.fn().mockResolvedValue(undefined),
     getAutoDownloadAppUpdates: vi.fn().mockResolvedValue(true),
     setAutoDownloadAppUpdates: vi.fn().mockResolvedValue(undefined),
     getAppUpdateState: vi.fn().mockResolvedValue({ kind: 'idle', currentVersion: '0.0.6' }),
@@ -5185,5 +5187,23 @@ describe('Inline registry rename', () => {
     expect(screen.queryByRole('textbox', { name: 'Registry name' })).not.toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(registryButton('anthropics/skills')).toBeInTheDocument()
+  })
+})
+
+describe('Simultaneous syncs', () => {
+  it('loads the stored number and saves a changed value', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      getSyncConcurrency: vi.fn().mockResolvedValue(3),
+      setSyncConcurrency: vi.fn().mockResolvedValue(undefined),
+    })
+    render(<App api={api} />)
+    await openSettings()
+    const input = await screen.findByRole('spinbutton', { name: 'Simultaneous syncs' })
+    expect(input).toHaveValue(3)
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '2' } })
+    })
+    expect(api.setSyncConcurrency).toHaveBeenCalledWith(2)
+    expect(input).toHaveValue(2)
   })
 })

@@ -237,6 +237,8 @@ pub fn run() {
             commands::set_auto_download_app_updates,
             commands::download_app_update,
             commands::restart_for_app_update,
+            commands::get_sync_concurrency,
+            commands::set_sync_concurrency,
             commands::get_appearance,
             commands::set_theme,
             commands::set_font_size,

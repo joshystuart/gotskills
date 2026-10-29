@@ -17,6 +17,7 @@ import { deriveInstallWork, runBulkInstall } from './bulkInstall'
 import { runBulkUpdate } from './bulkUpdate'
 import { AppearanceSettings } from './AppearanceSettings'
 import { applyFontSize } from './fontSize'
+import { SyncSettings } from './SyncSettings'
 import { AppUpdateSettings } from './AppUpdateSettings'
 import { AppUpdateBanner } from './AppUpdateBanner'
 import { useAppUpdate } from './useAppUpdate'
@@ -789,6 +790,7 @@ export function App({ api }: AppProps): JSX.Element {
 
         {settingsOpen ? (
           <SettingsView
+            syncSettings={<SyncSettings api={api} />}
             appearanceSettings={<AppearanceSettings api={api} />}
             appUpdateSettings={<AppUpdateSettings api={api} state={appUpdate.state} />}
             registries={registries}
