@@ -231,7 +231,9 @@ pub fn scan_skills(mirror_path: &Path) -> Result<Vec<ScannedSkill>, GitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mirror::test_support::{commit_all, git as run_git, make_repo, write_skill};
+    use crate::mirror::test_support::{
+        commit_all, git as run_git, last_commit_date, make_repo, write_skill,
+    };
     use std::fs;
 
     fn paths(skills: &[ScannedSkill]) -> Vec<&str> {
@@ -252,7 +254,7 @@ mod tests {
         );
         commit_all(repo.path(), "add skill");
         let sha = run_git(repo.path(), &["rev-parse", "HEAD"]);
-        let date = run_git(repo.path(), &["log", "-1", "--format=%cI"]);
+        let date = last_commit_date(repo.path(), None);
         run_git(repo.path(), &["config", "--local", "color.ui", "always"]);
 
         let found = scan_skills(repo.path()).unwrap();
@@ -323,7 +325,7 @@ mod tests {
         );
         commit_all(repo.path(), "add skill");
         let sha = run_git(repo.path(), &["rev-parse", "HEAD"]);
-        let date = run_git(repo.path(), &["log", "-1", "--format=%cI"]);
+        let date = last_commit_date(repo.path(), None);
         run_git(repo.path(), &["config", "--local", "log.showRoot", "false"]);
 
         let found = scan_skills(repo.path()).unwrap();
@@ -375,10 +377,7 @@ mod tests {
         );
         assert_eq!(
             found[0].updated_at,
-            run_git(
-                repo.path(),
-                &["log", "-1", "--format=%cI", "--", "skills/alpha"]
-            )
+            last_commit_date(repo.path(), Some("skills/alpha"))
         );
     }
 
@@ -416,10 +415,7 @@ mod tests {
             );
             assert_eq!(
                 skill.updated_at,
-                run_git(
-                    repo.path(),
-                    &["log", "-1", "--format=%cI", "--", &skill.skill_path]
-                )
+                last_commit_date(repo.path(), Some(&skill.skill_path))
             );
         }
     }
@@ -479,10 +475,7 @@ mod tests {
             );
             assert_eq!(
                 skill.updated_at,
-                run_git(
-                    repo.path(),
-                    &["log", "-1", "--format=%cI", "--", &skill.skill_path]
-                )
+                last_commit_date(repo.path(), Some(&skill.skill_path))
             );
             assert_eq!(
                 skill.content_hash,
@@ -528,8 +521,9 @@ mod tests {
                 fs::write(repo.path().join("skills/skill-0/data"), index.to_string()).unwrap();
                 commit_all(repo.path(), "update");
             }
-            let (found, calls) =
-                crate::mirror::git_exec::count_git_invocations(|| scan_skills(repo.path()).unwrap());
+            let (found, calls) = crate::mirror::git_exec::count_git_invocations(|| {
+                scan_skills(repo.path()).unwrap()
+            });
             assert_eq!(found.len(), skills);
             assert!(calls <= 3, "scan used {calls} git processes");
             calls

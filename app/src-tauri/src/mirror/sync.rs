@@ -168,7 +168,9 @@ pub fn sync_registry(
 mod tests {
     use super::*;
     use crate::db::open_database;
-    use crate::mirror::test_support::{commit_all, git as run_git, make_repo, write_skill};
+    use crate::mirror::test_support::{
+        commit_all, git as run_git, last_commit_date, make_repo, write_skill,
+    };
     use crate::registries::{get_marker, insert_registry, InsertRegistryInput};
     use std::fs;
     use std::path::Path;
@@ -392,7 +394,7 @@ mod tests {
         .unwrap();
         commit_all(remote.path(), "add new skill");
         let expected_commit = run_git(remote.path(), &["rev-parse", "HEAD"]);
-        let expected_date = run_git(remote.path(), &["log", "-1", "--format=%cI"]);
+        let expected_date = last_commit_date(remote.path(), None);
         sync_registry(&fx.conn, &fx.config).unwrap();
         assert_eq!(folders(&fx.conn, 0), vec!["alpha", "beta", "new"]);
         assert_eq!(
