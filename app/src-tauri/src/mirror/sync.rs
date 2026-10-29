@@ -209,6 +209,7 @@ mod tests {
 
     fn make_remote() -> tempfile::TempDir {
         let remote = make_repo();
+        run_git(remote.path(), &["config", "uploadpack.allowFilter", "true"]);
         write_skill(
             remote.path(),
             "skills/alpha",
@@ -250,7 +251,7 @@ mod tests {
     fn fixture(remote: &Path) -> Fixture {
         let work = tempfile::tempdir().unwrap();
         let conn = open_database(&work.path().join("cache.sqlite")).unwrap();
-        let url = remote.to_string_lossy().to_string();
+        let url = format!("file://{}", remote.display());
         let registry_id = seed_registry(&conn, &url);
         let config = SyncRegistryConfig {
             registry_id,
@@ -273,6 +274,173 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect()
+    }
+
+    #[test]
+    fn sparse_sync_downloads_skills_but_not_app_blobs() {
+        let remote = make_remote();
+        fs::create_dir_all(remote.path().join("app")).unwrap();
+        fs::write(
+            remote.path().join("app/main.rs"),
+            "unrelated application source",
+        )
+        .unwrap();
+        commit_all(remote.path(), "add app");
+        let blob = run_git(remote.path(), &["rev-parse", "HEAD:app/main.rs"]);
+        let fx = fixture(remote.path());
+        sync_registry(&fx.conn, &fx.config).unwrap();
+        assert!(!fx.config.mirror_path.join("app/main.rs").exists());
+        let objects = run_git(
+            &fx.config.mirror_path,
+            &[
+                "cat-file",
+                "--batch-all-objects",
+                "--batch-check=%(objectname)",
+            ],
+        );
+        assert!(!objects.lines().any(|object| object == blob));
+        assert!(fx.config.mirror_path.join("skills/alpha/SKILL.md").exists());
+    }
+
+    #[test]
+    fn resync_materializes_new_skill_folders_and_their_files() {
+        let remote = make_remote();
+        let fx = fixture(remote.path());
+        sync_registry(&fx.conn, &fx.config).unwrap();
+        write_skill(
+            remote.path(),
+            "skills/categories/tools/new",
+            Some("name: new\ndescription: Newly added"),
+        );
+        fs::write(
+            remote.path().join("skills/categories/tools/new/helper.txt"),
+            "helper",
+        )
+        .unwrap();
+        commit_all(remote.path(), "add new skill");
+        let expected_commit = run_git(remote.path(), &["rev-parse", "HEAD"]);
+        let expected_date = run_git(remote.path(), &["log", "-1", "--format=%cI"]);
+        sync_registry(&fx.conn, &fx.config).unwrap();
+        assert_eq!(folders(&fx.conn, 0), vec!["alpha", "beta", "new"]);
+        assert_eq!(
+            fs::read_to_string(
+                fx.config
+                    .mirror_path
+                    .join("skills/categories/tools/new/helper.txt")
+            )
+            .unwrap(),
+            "helper"
+        );
+        let provenance: (String, String) = fx
+            .conn
+            .query_row(
+                "SELECT head_provenance_sha, head_updated_at FROM skill WHERE folder_name = 'new'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(provenance, (expected_commit, expected_date));
+    }
+
+    #[test]
+    fn retains_nested_plugin_manifests_and_groupings() {
+        let remote = make_repo();
+        run_git(remote.path(), &["config", "uploadpack.allowFilter", "true"]);
+        fs::create_dir_all(remote.path().join(".claude-plugin")).unwrap();
+        fs::write(remote.path().join(".claude-plugin/marketplace.json"), r#"{"plugins":[{"source":"./plugins/demo","name":"demo","skills":["./skills/review"]}]}"#).unwrap();
+        fs::create_dir_all(remote.path().join("plugins/demo/.claude-plugin")).unwrap();
+        fs::write(
+            remote
+                .path()
+                .join("plugins/demo/.claude-plugin/plugin.json"),
+            r#"{"name":"demo","skills":["./skills/review"]}"#,
+        )
+        .unwrap();
+        write_skill(
+            remote.path(),
+            "plugins/demo/skills/review",
+            Some("name: review\ndescription: Review"),
+        );
+        commit_all(remote.path(), "nested plugin");
+        let fx = fixture(remote.path());
+        sync_registry(&fx.conn, &fx.config).unwrap();
+        assert!(fx
+            .config
+            .mirror_path
+            .join("plugins/demo/.claude-plugin/plugin.json")
+            .exists());
+        let skills = scan_skills(&fx.config.mirror_path);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].plugin_name.as_deref(), Some("demo"));
+    }
+
+    #[test]
+    fn installs_and_browses_files_from_a_partial_mirror() {
+        use crate::env::Environment;
+        use crate::installer::install::{install_skill, InstallDeps};
+        use crate::mirror::skill_files::{list_skill_files, read_skill_file, SkillFilesDeps};
+        use crate::types::{InstallRequest, SkillFileReadRequest, SkillFileRequest, TargetOutcome};
+
+        let remote = make_remote();
+        fs::write(
+            remote.path().join("skills/alpha/helper.txt"),
+            "helper contents",
+        )
+        .unwrap();
+        commit_all(remote.path(), "add helper");
+        let fx = fixture(remote.path());
+        let synced = sync_registry(&fx.conn, &fx.config).unwrap();
+        assert!(crate::mirror::git::is_partial_sparse_mirror(
+            &fx.config.mirror_path
+        ));
+        let home = tempfile::tempdir().unwrap();
+        let environment = Environment::fake_home(home.path());
+        let installed = install_skill(
+            &InstallDeps {
+                conn: &fx.conn,
+                registry_id: &fx.config.registry_id,
+                mirror_path: &fx.config.mirror_path,
+                environment: &environment,
+                current_revision: &synced.revision,
+            },
+            &InstallRequest {
+                registry_id: fx.config.registry_id.clone(),
+                folder_name: "alpha".into(),
+                targets: vec!["~/.agents/skills".into()],
+                mirror_revision: synced.revision.clone(),
+                acknowledge_stale: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(installed.per_target[0].outcome, TargetOutcome::Installed);
+        assert_eq!(
+            fs::read_to_string(home.path().join(".agents/skills/alpha/helper.txt")).unwrap(),
+            "helper contents"
+        );
+        let mirror = |_: &str| fx.config.mirror_path.clone();
+        let deps = SkillFilesDeps {
+            conn: &fx.conn,
+            mirror_path_for: &mirror,
+        };
+        let files = list_skill_files(
+            &deps,
+            &SkillFileRequest {
+                registry_id: fx.config.registry_id.clone(),
+                folder_name: "alpha".into(),
+            },
+        )
+        .unwrap();
+        assert!(files.files.iter().any(|file| file.path == "helper.txt"));
+        let content = read_skill_file(
+            &deps,
+            &SkillFileReadRequest {
+                registry_id: fx.config.registry_id.clone(),
+                folder_name: "alpha".into(),
+                path: "helper.txt".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(content.content.as_deref(), Some("helper contents"));
     }
 
     #[test]
@@ -315,12 +483,18 @@ mod tests {
         let fx = fixture(remote.path());
         sync_registry(&fx.conn, &fx.config).unwrap();
 
-        fs::remove_dir_all(remote.path().join("skills/beta")).unwrap();
+        fs::remove_file(remote.path().join("skills/beta/SKILL.md")).unwrap();
+        fs::write(
+            remote.path().join("skills/beta/leftover.txt"),
+            "no longer a skill",
+        )
+        .unwrap();
         commit_all(remote.path(), "remove beta");
         sync_registry(&fx.conn, &fx.config).unwrap();
 
         assert_eq!(folders(&fx.conn, 0), vec!["alpha"]);
         assert_eq!(folders(&fx.conn, 1), vec!["beta"]);
+        assert!(!fx.config.mirror_path.join("skills/beta").exists());
     }
 
     #[test]
@@ -391,6 +565,7 @@ mod tests {
     #[test]
     fn persists_skill_path_for_nested_layouts() {
         let remote = make_repo();
+        run_git(remote.path(), &["config", "uploadpack.allowFilter", "true"]);
         write_skill(
             remote.path(),
             "skills/engineering/code-review",
@@ -414,6 +589,7 @@ mod tests {
     #[test]
     fn syncs_nested_skills_after_a_category_folder_move() {
         let remote = make_repo();
+        run_git(remote.path(), &["config", "uploadpack.allowFilter", "true"]);
         write_skill(
             remote.path(),
             "skills/productivity/teach",
