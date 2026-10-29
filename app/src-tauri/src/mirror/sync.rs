@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use rusqlite::{named_params, Connection};
 
 use crate::db::{transaction, SyncMarkerStatus};
-use crate::registries::upsert_marker_success;
+use crate::registries::{get_marker, upsert_marker_success};
 
-use super::git::{ensure_mirror, MirrorConfig};
+use super::git::{ensure_mirror_since, MirrorConfig};
 use super::git_exec::GitError;
 use super::scan::{scan_skills, ScannedSkill};
 
@@ -27,6 +27,7 @@ pub struct SyncWriteResult {
     pub visible_skill_count: u32,
     /// `Ok` or `Empty`.
     pub status: SyncMarkerStatus,
+    pub skipped: bool,
 }
 
 fn now() -> String {
@@ -113,6 +114,7 @@ pub fn write_scan_to_db(
         revision: revision.to_string(),
         visible_skill_count: skills.len() as u32,
         status,
+        skipped: false,
     })
 }
 
@@ -123,11 +125,42 @@ pub fn sync_registry(
     conn: &Connection,
     config: &SyncRegistryConfig,
 ) -> Result<SyncWriteResult, GitError> {
-    let revision = ensure_mirror(&MirrorConfig {
-        url: config.url.clone(),
-        branch: config.branch.clone(),
-        mirror_path: config.mirror_path.clone(),
-    })?;
+    let marker = get_marker(conn, &config.registry_id)
+        .map_err(|error| GitError::new(error.to_string()))?
+        .filter(|marker| {
+            !marker.stale
+                && matches!(
+                    marker.status,
+                    SyncMarkerStatus::Ok | SyncMarkerStatus::Empty
+                )
+        });
+    let (revision, skipped) = ensure_mirror_since(
+        &MirrorConfig {
+            url: config.url.clone(),
+            branch: config.branch.clone(),
+            mirror_path: config.mirror_path.clone(),
+        },
+        marker
+            .as_ref()
+            .and_then(|marker| marker.last_sync_revision.as_deref()),
+    )?;
+    if skipped {
+        let status = marker
+            .expect("skipping requires a successful marker")
+            .status;
+        let visible_skill_count = conn.query_row(
+            "SELECT COUNT(*) FROM skill WHERE registry_id = ?1 AND soft_deleted = 0",
+            [&config.registry_id],
+            |row| row.get(0),
+        )?;
+        upsert_marker_success(conn, &config.registry_id, &revision, &now(), status)?;
+        return Ok(SyncWriteResult {
+            revision,
+            visible_skill_count,
+            status,
+            skipped,
+        });
+    }
     let skills = scan_skills(&config.mirror_path);
     write_scan_to_db(
         conn,
@@ -214,6 +247,139 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect()
+    }
+
+    #[test]
+    fn unchanged_sync_preserves_skill_rows_with_three_git_calls() {
+        let remote = make_remote();
+        let fx = fixture(remote.path());
+        sync_registry(&fx.conn, &fx.config).unwrap();
+        fx.conn
+            .execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
+            .unwrap();
+        let (result, calls) = crate::mirror::git_exec::count_git_invocations(|| {
+            sync_registry(&fx.conn, &fx.config).unwrap()
+        });
+        assert_eq!(result.visible_skill_count, 2);
+        assert!(calls <= 3, "unchanged sync used {calls} git calls");
+        let untouched: u32 = fx
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM skill WHERE last_seen_at = 'sentinel'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(untouched, 2);
+    }
+
+    #[test]
+    fn non_skill_commits_rescan_without_changing_skill_hashes() {
+        let remote = make_remote();
+        let fx = fixture(remote.path());
+        let first = sync_registry(&fx.conn, &fx.config).unwrap();
+        let hashes = || -> Vec<String> {
+            fx.conn
+                .prepare("SELECT head_content_hash FROM skill ORDER BY folder_name")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        let before = hashes();
+        fx.conn
+            .execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
+            .unwrap();
+        fs::write(
+            remote.path().join("README.md"),
+            "only documentation changed",
+        )
+        .unwrap();
+        commit_all(remote.path(), "docs");
+        let next = sync_registry(&fx.conn, &fx.config).unwrap();
+        assert!(!next.skipped);
+        assert_ne!(first.revision, next.revision);
+        assert_eq!(hashes(), before);
+        let untouched: u32 = fx
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM skill WHERE last_seen_at = 'sentinel'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(untouched, 0);
+    }
+
+    #[test]
+    fn unchanged_head_rescans_after_a_failed_sync() {
+        let remote = make_remote();
+        let fx = fixture(remote.path());
+        sync_registry(&fx.conn, &fx.config).unwrap();
+        let broken = SyncRegistryConfig {
+            url: format!("file://{}", fx._work.path().join("missing").display()),
+            ..fx.config.clone()
+        };
+        assert!(sync_registry(&fx.conn, &broken).is_err());
+        crate::mirror::catalogue::record_sync_failure(
+            &fx.conn,
+            &fx.config.registry_id,
+            SyncMarkerStatus::Offline,
+        )
+        .unwrap();
+        fx.conn
+            .execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
+            .unwrap();
+        let result = sync_registry(&fx.conn, &fx.config).unwrap();
+        assert!(!result.skipped);
+        let untouched: u32 = fx
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM skill WHERE last_seen_at = 'sentinel'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(untouched, 0);
+        assert!(
+            !get_marker(&fx.conn, &fx.config.registry_id)
+                .unwrap()
+                .unwrap()
+                .stale
+        );
+    }
+
+    #[test]
+    fn unchanged_full_mirror_converts_and_rescans() {
+        let remote = make_remote();
+        let fx = fixture(remote.path());
+        let first = sync_registry(&fx.conn, &fx.config).unwrap();
+        fs::remove_dir_all(&fx.config.mirror_path).unwrap();
+        crate::mirror::git_exec::git_global(&[
+            "clone",
+            &fx.config.url,
+            fx.config.mirror_path.to_str().unwrap(),
+        ])
+        .unwrap();
+        fx.conn
+            .execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
+            .unwrap();
+        let result = sync_registry(&fx.conn, &fx.config).unwrap();
+        assert!(!result.skipped);
+        assert_eq!(result.revision, first.revision);
+        assert!(crate::mirror::git::is_partial_sparse_mirror(
+            &fx.config.mirror_path
+        ));
+        let untouched: u32 = fx
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM skill WHERE last_seen_at = 'sentinel'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(untouched, 0);
     }
 
     #[test]

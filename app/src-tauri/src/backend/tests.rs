@@ -729,6 +729,29 @@ fn auto_update_brings_installed_skills_current_and_reports_it() {
 }
 
 #[test]
+fn unchanged_sync_is_synced_without_running_auto_update() {
+    let h = harness();
+    without_default(&h.backend);
+    let source = remote(&["alpha"]);
+    let registry = add(&h.backend, source.path());
+    h.backend
+        .install(&install_request(&registry, "alpha", &["~/.claude/skills"]))
+        .unwrap();
+    change_remote(source.path(), &["alpha"], "changed");
+    h.backend.sync_registry(&registry.id).unwrap();
+    let mut enable = update(&registry.id);
+    enable.auto_update = Some(true);
+    h.backend.update_registry(&enable).unwrap();
+    h.backend.sync_registry(&registry.id).unwrap();
+    let status = current(&h.backend, &registry.id).sync_status;
+    assert_eq!(status.phase, SyncPhase::Synced);
+    assert_eq!(status.stale, Some(false));
+    assert!(h.events.auto_updates.lock().unwrap().is_empty());
+    let body = fs::read_to_string(h.home.path().join(".claude/skills/alpha/SKILL.md")).unwrap();
+    assert!(!body.contains("description: changed"));
+}
+
+#[test]
 fn without_auto_update_a_sync_leaves_installs_behind() {
     let h = harness();
     without_default(&h.backend);

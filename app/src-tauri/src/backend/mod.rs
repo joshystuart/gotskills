@@ -369,7 +369,7 @@ impl Backend {
             .clone()
     }
 
-    fn sync_exclusive(&self, registry: &StoredRegistry) -> AppResult<RegistrySyncStatus> {
+    fn sync_exclusive(&self, registry: &StoredRegistry) -> AppResult<(RegistrySyncStatus, bool)> {
         self.mirror_mutex(&registry.id).run_exclusive(|| {
             self.runtime().syncing.insert(registry.id.clone());
             self.emit_status();
@@ -379,11 +379,14 @@ impl Backend {
         })
     }
 
-    fn sync_locked(&self, registry: &StoredRegistry) -> AppResult<RegistrySyncStatus> {
+    fn sync_locked(&self, registry: &StoredRegistry) -> AppResult<(RegistrySyncStatus, bool)> {
         if !is_git_available() {
             let conn = self.db();
             record_sync_failure(&conn, &registry.id, SyncMarkerStatus::Offline)?;
-            return registry_sync_status_from_marker(&conn, &registry.id);
+            return Ok((
+                registry_sync_status_from_marker(&conn, &registry.id)?,
+                false,
+            ));
         }
         let config = SyncRegistryConfig {
             registry_id: registry.id.clone(),
@@ -395,6 +398,7 @@ impl Backend {
         sync_conn.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
         let result = (self.sync_impl)(&sync_conn, &config);
         let conn = self.db();
+        let scanned = result.as_ref().is_ok_and(|written| !written.skipped);
         match result {
             Ok(written) => {
                 let mut event = EmitInput::new(TelemetryEventType::SyncCompleted);
@@ -407,7 +411,10 @@ impl Backend {
                 record_sync_failure(&conn, &registry.id, marker_status_for(reason))?;
             }
         }
-        registry_sync_status_from_marker(&conn, &registry.id)
+        Ok((
+            registry_sync_status_from_marker(&conn, &registry.id)?,
+            scanned,
+        ))
     }
 
     /// Sync one registry; concurrent requests for the same id wait for the
@@ -432,8 +439,8 @@ impl Backend {
             backend: self,
             registry_id: registry.id.clone(),
         };
-        let status = self.sync_exclusive(registry)?;
-        if status.phase == SyncPhase::Synced {
+        let (status, scanned) = self.sync_exclusive(registry)?;
+        if status.phase == SyncPhase::Synced && scanned {
             self.apply_auto_updates(&registry.id)?;
         }
         Ok(status)

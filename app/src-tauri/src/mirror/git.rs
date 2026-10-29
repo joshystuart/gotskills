@@ -186,6 +186,14 @@ fn replace_mirror(config: &MirrorConfig) -> Result<(), GitError> {
 /// Clone or fetch a registry, keeping only skill and manifest folders checked out.
 /// Full mirrors are replaced only after a replacement clone succeeds.
 pub fn ensure_mirror(config: &MirrorConfig) -> Result<String, GitError> {
+    Ok(ensure_mirror_since(config, None)?.0)
+}
+
+/// Fetch a mirror, skipping checkout only when its fetched head matches a successful revision.
+pub fn ensure_mirror_since(
+    config: &MirrorConfig,
+    successful_revision: Option<&str>,
+) -> Result<(String, bool), GitError> {
     let path = &config.mirror_path;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -200,11 +208,15 @@ pub fn ensure_mirror(config: &MirrorConfig) -> Result<String, GitError> {
         );
         git(path, &["fetch", "origin", &refspec])?;
         let origin_branch = format!("origin/{}", config.branch);
+        let revision = git(path, &["rev-parse", &origin_branch])?;
+        if successful_revision == Some(revision.as_str()) {
+            return Ok((revision, true));
+        }
         apply_sparse_paths(path, &origin_branch)?;
         git(path, &["checkout", "-B", &config.branch, &origin_branch])?;
         git(path, &["reset", "--hard", &origin_branch])?;
     }
-    git(path, &["rev-parse", "HEAD"])
+    Ok((git(path, &["rev-parse", "HEAD"])?, false))
 }
 
 #[cfg(test)]
