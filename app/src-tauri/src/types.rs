@@ -165,6 +165,8 @@ pub struct CatalogueSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryRecord {
+    pub source: String,
+    pub automatic_name: String,
     pub id: String,
     pub url: String,
     pub branch: String,

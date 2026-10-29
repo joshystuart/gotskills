@@ -90,7 +90,7 @@ fn remote(ids: &[&str]) -> tempfile::TempDir {
 fn add(backend: &Backend, remote: &Path) -> RegistryRecord {
     backend
         .add_registry(&AddRegistryRequest {
-            url: remote.to_string_lossy().into_owned(),
+            url: format!("file://{}", remote.display()),
             branch: Some("main".into()),
             enabled: None,
         })
@@ -1033,4 +1033,132 @@ fn changing_concurrency_does_not_interrupt_the_current_refresh() {
         assert!(pending.iter().all(Result::is_ok));
     });
     assert_eq!(h.backend.get_sync_concurrency(), 1);
+}
+
+#[test]
+fn local_registry_snapshots_without_git() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    let (registry, calls) = crate::mirror::git_exec::count_git_invocations(|| {
+        h.backend
+            .add_registry(&AddRegistryRequest {
+                url: "~/drafts".into(),
+                branch: None,
+                enabled: None,
+            })
+            .unwrap()
+    });
+    assert_eq!(calls, 0);
+    assert_eq!(registry.source, "local");
+    assert_eq!(registry.branch, "");
+    assert_eq!(folders(&h.backend), vec!["alpha"]);
+}
+
+#[test]
+fn local_installs_use_pinned_snapshots_and_auto_update_changed_content() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: First"));
+    fs::write(folder.join("alpha/helper.txt"), "first").unwrap();
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: "~/drafts".into(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let request = install_request(&registry, "alpha", &["~/.agents/skills"]);
+    fs::write(folder.join("alpha/helper.txt"), "second").unwrap();
+    let (_, calls) =
+        crate::mirror::git_exec::count_git_invocations(|| h.backend.install(&request).unwrap());
+    assert_eq!(calls, 0);
+    assert_eq!(
+        fs::read_to_string(h.home.path().join(".agents/skills/alpha/helper.txt")).unwrap(),
+        "first"
+    );
+    let mut change = update(&registry.id);
+    change.auto_update = Some(true);
+    h.backend.update_registry(&change).unwrap();
+    assert_eq!(
+        fs::read_to_string(h.home.path().join(".agents/skills/alpha/helper.txt")).unwrap(),
+        "second"
+    );
+    assert!(h.backend.install(&request).is_err());
+}
+
+#[test]
+fn local_identity_and_folder_guards_use_real_paths() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    let add_path = |url: String| {
+        h.backend.add_registry(&AddRegistryRequest {
+            url,
+            branch: None,
+            enabled: Some(false),
+        })
+    };
+    let registry = add_path("~/drafts".into()).unwrap();
+    assert_eq!(registry.automatic_name, "~/drafts");
+    let link = h.home.path().join("alias");
+    std::os::unix::fs::symlink(&folder, &link).unwrap();
+    assert!(add_path(link.to_string_lossy().into_owned())
+        .unwrap_err()
+        .to_string()
+        .contains("already configured"));
+    for path in [
+        "~".to_string(),
+        "/".into(),
+        h.data.path().to_string_lossy().into_owned(),
+    ] {
+        assert!(add_path(path)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be"));
+    }
+}
+
+#[test]
+fn local_content_changes_offer_updates_and_conflict_with_git_skills() {
+    let h = harness();
+    without_default(&h.backend);
+    let git_source = remote(&["alpha"]);
+    add(&h.backend, git_source.path());
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: "~/drafts".into(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let skills = h.backend.get_catalogue().unwrap().skills;
+    assert_eq!(skills.len(), 2);
+    assert!(skills.iter().all(|skill| skill.conflict));
+    h.backend
+        .install(&install_request(&registry, "alpha", &["~/.agents/skills"]))
+        .unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Changed"));
+    let (_, calls) = crate::mirror::git_exec::count_git_invocations(|| {
+        h.backend.sync_registry(&registry.id).unwrap()
+    });
+    assert_eq!(calls, 0);
+    let report = h
+        .backend
+        .reconcile(Some(&registry.id), Some("alpha"))
+        .unwrap();
+    assert!(report
+        .entries
+        .iter()
+        .any(|entry| entry.state == ReconcileState::UpdateAvailable));
 }

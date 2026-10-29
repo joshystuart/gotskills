@@ -84,7 +84,7 @@ mod tests {
     fn fresh_database_has_the_final_schema_and_pragmas() {
         let dir = tempfile::tempdir().unwrap();
         let db = open_database(&dir.path().join("cache.sqlite")).unwrap();
-        assert_eq!(user_version(&db).unwrap(), 11);
+        assert_eq!(user_version(&db).unwrap(), 12);
         assert_eq!(count(&db, "PRAGMA foreign_keys"), 1);
         let mode: String = db
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
@@ -148,7 +148,7 @@ mod tests {
             .unwrap();
         drop(previous);
         let db = open_database(&path).unwrap();
-        assert_eq!(user_version(&db).unwrap(), 11);
+        assert_eq!(user_version(&db).unwrap(), 12);
         let (branch, colour, name): (String, Option<String>, Option<String>) = db
             .query_row(
                 "SELECT branch, colour, name FROM registry WHERE id = 'saved'",
@@ -254,7 +254,7 @@ mod tests {
             .unwrap();
         drop(first);
         let second = open_database(&path).unwrap();
-        assert_eq!(user_version(&second).unwrap(), 11);
+        assert_eq!(user_version(&second).unwrap(), 12);
         assert_eq!(
             count(&second, "SELECT count(*) FROM registry WHERE id = 'r1'"),
             1
@@ -279,7 +279,7 @@ mod tests {
         .unwrap();
         drop(v3);
         let db = open_database(&path).unwrap();
-        assert_eq!(user_version(&db).unwrap(), 11);
+        assert_eq!(user_version(&db).unwrap(), 12);
         let installation: String = db
             .query_row(
                 "SELECT installation_id FROM telemetry_event WHERE event_id = 'event-a'",
@@ -337,6 +337,6 @@ mod tests {
     #[test]
     fn migrations_are_numbered_contiguously() {
         let versions: Vec<i64> = MIGRATIONS.iter().map(|(v, _)| *v).collect();
-        assert_eq!(versions, (1..=11).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=12).collect::<Vec<_>>());
     }
 }

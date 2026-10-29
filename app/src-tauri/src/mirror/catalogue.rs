@@ -434,6 +434,7 @@ mod tests {
         insert_registry(
             conn,
             &InsertRegistryInput {
+                source: "git".into(),
                 url: format!("https://github.com/o/{key}"),
                 branch: "main".into(),
                 enabled: true,

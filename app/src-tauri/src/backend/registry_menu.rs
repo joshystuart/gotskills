@@ -138,6 +138,8 @@ mod tests {
 
     fn registry(owner: Option<&str>, repo: Option<&str>) -> RegistryRecord {
         RegistryRecord {
+            source: "git".into(),
+            automatic_name: "o/r".into(),
             id: "r1".into(),
             url: "https://example.test/r1".into(),
             branch: "main".into(),

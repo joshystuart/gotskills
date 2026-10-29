@@ -24,6 +24,8 @@ import {
 const REG = 'reg-1'
 
 const DEFAULT_REGISTRY_RECORD: RegistryRecord = {
+  source: 'git',
+  automaticName: '',
   id: 'default',
   url: 'https://github.com/anthropics/skills',
   branch: 'main',
@@ -299,6 +301,8 @@ describe('App shell', () => {
 
   it('filters the catalogue by registry when multiple registries are configured', async () => {
     const secondRegistry: RegistryRecord = {
+      source: 'git',
+      automaticName: '',
       id: 'reg-2',
       url: 'https://github.com/example-org/skills',
       branch: 'main',
@@ -2980,6 +2984,8 @@ describe('Update all', () => {
 
   it('shows the count and an enabled action when Skills are behind, unaffected by search, registry filter, or view', async () => {
     const secondRegistry: RegistryRecord = {
+      source: 'git',
+      automaticName: '',
       id: 'reg-2',
       url: 'https://github.com/example-org/skills',
       branch: 'main',

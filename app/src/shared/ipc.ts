@@ -106,6 +106,8 @@ export interface CatalogueSnapshot {
 }
 
 export interface RegistryRecord {
+  source: 'git' | 'local'
+  automaticName: string
   id: string
   url: string
   branch: string

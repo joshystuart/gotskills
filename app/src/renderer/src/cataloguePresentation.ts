@@ -157,10 +157,13 @@ export function registryRecordLabel(registry: {
 
 /** Automatic name for a Registry record: `owner/repo` for GitHub, else host + path, else the raw URL. */
 export function automaticRegistryRecordName(registry: {
+  source?: 'git' | 'local'
+  automaticName?: string
   githubOwner: string | null
   githubRepo: string | null
   url: string
 }): string {
+  if (registry.source === 'local' && registry.automaticName) return registry.automaticName
   if (registry.githubOwner && registry.githubRepo) {
     return `${registry.githubOwner}/${registry.githubRepo}`
   }

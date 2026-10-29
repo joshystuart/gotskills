@@ -9,6 +9,7 @@ export class RegistryUrlError extends Error {
 export interface CanonicalRegistry {
   /** Normalized URL safe to persist and clone (credentials already rejected). */
   url: string
+  source: 'git' | 'local'
   /** Unique dedup key: `github:owner/repo` (lowercased) or `git:<normalized>`. */
   canonicalKey: string
   githubOwner: string | null
@@ -38,6 +39,7 @@ function toOwnerRepo(pathname: string): { owner: string; repo: string } | null {
 
 function githubResult(owner: string, repo: string, url: string): CanonicalRegistry {
   return {
+    source: 'git',
     url,
     canonicalKey: `github:${owner.toLowerCase()}/${repo.toLowerCase()}`,
     githubOwner: owner,
@@ -49,6 +51,7 @@ function githubResult(owner: string, repo: string, url: string): CanonicalRegist
 
 function genericResult(url: string, canonicalBody: string, label: string): CanonicalRegistry {
   return {
+    source: 'git',
     url,
     canonicalKey: `git:${canonicalBody}`,
     githubOwner: null,
@@ -70,6 +73,9 @@ export function canonicalizeRegistryUrl(input: string): CanonicalRegistry {
     throw new RegistryUrlError('Registry URL is required')
   }
 
+  if (isLocalPath(url)) {
+    return { ...genericResult(url, url, url), source: 'local', canonicalKey: `local:${url}` }
+  }
   const scp = SCP_LIKE.exec(url)
   if (scp && !url.includes('://')) {
     const [, user, host, path] = scp
@@ -118,4 +124,9 @@ export function canonicalizeRegistryUrl(input: string): CanonicalRegistry {
   const canonicalBody = `${parsed.protocol}//${parsed.host.toLowerCase()}${normalizedPath}`
   const label = `${parsed.host}${normalizedPath}`
   return genericResult(url, canonicalBody, label)
+}
+
+export function isLocalPath(input: string): boolean {
+  const value = input.trim()
+  return value.startsWith('/') || value.startsWith('~/') || value === '~'
 }

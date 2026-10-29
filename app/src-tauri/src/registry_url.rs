@@ -15,6 +15,11 @@ pub struct CanonicalRegistry {
     pub is_github: bool,
 }
 
+pub fn is_local_path(input: &str) -> bool {
+    let input = input.trim();
+    input.starts_with('/') || input.starts_with("~/") || input == "~"
+}
+
 fn invalid(message: &str) -> AppError {
     AppError::RegistryUrlInvalid {
         message: message.to_string(),
@@ -86,6 +91,12 @@ pub fn canonicalize_registry_url(input: &str) -> Result<CanonicalRegistry, AppEr
     let url = input.trim();
     if url.is_empty() {
         return Err(invalid("Registry URL is required"));
+    }
+
+    if is_local_path(url) {
+        let mut result = generic_result(url, url, url.to_string());
+        result.canonical_key = format!("local:{url}");
+        return Ok(result);
     }
 
     if let Some(captures) = scp_like().captures(url) {
@@ -242,6 +253,6 @@ mod tests {
         let result = canonicalize_registry_url("/tmp/local-registry").unwrap();
         assert!(!result.is_github);
         assert_eq!(result.url, "/tmp/local-registry");
-        assert_eq!(result.canonical_key, "git:/tmp/local-registry");
+        assert_eq!(result.canonical_key, "local:/tmp/local-registry");
     }
 }

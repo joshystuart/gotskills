@@ -13,6 +13,7 @@ use super::scan::{scan_skills, ScannedSkill};
 /// Inputs for syncing one registry.
 #[derive(Debug, Clone)]
 pub struct SyncRegistryConfig {
+    pub source: String,
     pub registry_id: String,
     pub url: String,
     pub branch: String,
@@ -124,6 +125,41 @@ pub fn sync_registry(
     conn: &Connection,
     config: &SyncRegistryConfig,
 ) -> Result<SyncWriteResult, GitError> {
+    if config.source == "local" {
+        let snapshot =
+            super::local::snapshot_local(std::path::Path::new(&config.url), &config.mirror_path)?;
+        let marker = get_marker(conn, &config.registry_id).map_err(|error| GitError {
+            message: error.to_string(),
+        })?;
+        if let Some(marker) = marker.filter(|marker| {
+            !marker.stale
+                && marker.last_sync_revision.as_deref() == Some(&snapshot.revision)
+                && matches!(
+                    marker.status,
+                    SyncMarkerStatus::Ok | SyncMarkerStatus::Empty
+                )
+        }) {
+            upsert_marker_success(
+                conn,
+                &config.registry_id,
+                &snapshot.revision,
+                &now(),
+                marker.status,
+            )?;
+            return Ok(SyncWriteResult {
+                revision: snapshot.revision,
+                visible_skill_count: snapshot.skills.len() as u32,
+                status: marker.status,
+                skipped: true,
+            });
+        }
+        return write_scan_to_db(
+            conn,
+            &config.registry_id,
+            &snapshot.revision,
+            &snapshot.skills,
+        );
+    }
     let marker = get_marker(conn, &config.registry_id)
         .map_err(|error| GitError::new(error.to_string()))?
         .filter(|marker| {
@@ -197,6 +233,7 @@ mod tests {
         insert_registry(
             conn,
             &InsertRegistryInput {
+                source: "git".into(),
                 url: url.to_string(),
                 branch: "main".into(),
                 enabled: true,
@@ -222,6 +259,7 @@ mod tests {
         let url = format!("file://{}", remote.display());
         let registry_id = seed_registry(&conn, &url);
         let config = SyncRegistryConfig {
+            source: "git".into(),
             registry_id,
             url,
             branch: "main".into(),
@@ -307,6 +345,7 @@ mod tests {
         let fx = fixture(remote.path());
         sync_registry(&fx.conn, &fx.config).unwrap();
         let broken = SyncRegistryConfig {
+            source: "git".into(),
             url: format!("file://{}", fx._work.path().join("missing").display()),
             ..fx.config.clone()
         };
@@ -602,6 +641,7 @@ mod tests {
         sync_registry(&fx.conn, &fx.config).unwrap();
 
         let broken = SyncRegistryConfig {
+            source: "git".into(),
             url: fx
                 .config
                 .mirror_path
@@ -686,5 +726,62 @@ mod tests {
         assert_eq!(result.status, SyncMarkerStatus::Ok);
         assert_eq!(result.visible_skill_count, 1);
         assert_eq!(folders(&fx.conn, 0), vec!["teach"]);
+    }
+}
+
+#[cfg(test)]
+mod local_sync_tests {
+    use super::*;
+
+    #[test]
+    fn unchanged_local_sync_skips_without_git_and_preserves_catalogue_dates() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        crate::mirror::test_support::write_skill(
+            &source,
+            "alpha",
+            Some("name: alpha\ndescription: Draft"),
+        );
+        let conn = crate::db::open_database(&root.path().join("db.sqlite")).unwrap();
+        let registry = crate::registries::insert_registry(
+            &conn,
+            &crate::registries::InsertRegistryInput {
+                source: "local".into(),
+                url: source.to_string_lossy().into_owned(),
+                branch: String::new(),
+                enabled: true,
+                auto_update: false,
+                github_owner: None,
+                github_repo: None,
+                canonical_key: "local:test".into(),
+            },
+        )
+        .unwrap();
+        let config = SyncRegistryConfig {
+            source: "local".into(),
+            registry_id: registry.id,
+            url: source.to_string_lossy().into_owned(),
+            branch: String::new(),
+            mirror_path: root.path().join("mirror"),
+        };
+        let first = sync_registry(&conn, &config).unwrap();
+        conn.execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
+            .unwrap();
+        let skill = source.join("alpha/SKILL.md");
+        let contents = std::fs::read(&skill).unwrap();
+        std::fs::write(skill, contents).unwrap();
+        let (next, calls) = crate::mirror::git_exec::count_git_invocations(|| {
+            sync_registry(&conn, &config).unwrap()
+        });
+        assert!(next.skipped);
+        assert_eq!(next.revision, first.revision);
+        assert_eq!(calls, 0);
+        assert_eq!(
+            conn.query_row("SELECT last_seen_at FROM skill", [], |row| row
+                .get::<_, String>(0))
+                .unwrap(),
+            "sentinel"
+        );
     }
 }

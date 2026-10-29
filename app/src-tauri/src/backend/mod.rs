@@ -43,8 +43,8 @@ use crate::mirror::skill_files::{list_skill_files, read_skill_file, SkillFilesDe
 use crate::mirror::sync::{sync_registry, SyncRegistryConfig, SyncWriteResult};
 use crate::registries::{
     find_by_canonical_key, get_marker, get_registry, hard_delete_registry, insert_registry,
-    list_registries, registry_label, soft_remove_registry, update_registry, InsertRegistryInput,
-    StoredRegistry, UpdateRegistryFields,
+    list_registries, soft_remove_registry, update_registry, InsertRegistryInput, StoredRegistry,
+    UpdateRegistryFields,
 };
 use crate::registry_url::canonicalize_registry_url;
 use crate::telemetry::TelemetryEventType;
@@ -256,6 +256,7 @@ impl Backend {
         let _ = insert_registry(
             &self.db(),
             &InsertRegistryInput {
+                source: "git".into(),
                 url: DEFAULT_REGISTRY.url.to_string(),
                 branch: DEFAULT_REGISTRY.branch.to_string(),
                 enabled: true,
@@ -330,8 +331,29 @@ impl Backend {
         }
     }
 
+    fn automatic_registry_name(&self, registry: &StoredRegistry) -> String {
+        if registry.source != "local" {
+            return crate::registries::automatic_registry_name(registry);
+        }
+        let home = std::fs::canonicalize(&self.environment.home)
+            .unwrap_or_else(|_| self.environment.home.clone());
+        std::path::Path::new(&registry.url)
+            .strip_prefix(home)
+            .map(|path| format!("~/{}", path.display()))
+            .unwrap_or_else(|_| registry.url.clone())
+    }
+
+    fn registry_label(&self, registry: &StoredRegistry) -> String {
+        registry
+            .name
+            .clone()
+            .unwrap_or_else(|| self.automatic_registry_name(registry))
+    }
+
     fn to_record(&self, conn: &Connection, registry: &StoredRegistry) -> AppResult<RegistryRecord> {
         Ok(RegistryRecord {
+            source: registry.source.clone(),
+            automatic_name: self.automatic_registry_name(registry),
             id: registry.id.clone(),
             url: registry.url.clone(),
             branch: registry.branch.clone(),
@@ -380,7 +402,7 @@ impl Backend {
     }
 
     fn sync_locked(&self, registry: &StoredRegistry) -> AppResult<(RegistrySyncStatus, bool)> {
-        if !is_git_available() {
+        if registry.source == "git" && !is_git_available() {
             let conn = self.db();
             record_sync_failure(&conn, &registry.id, SyncMarkerStatus::Offline)?;
             return Ok((
@@ -389,6 +411,7 @@ impl Backend {
             ));
         }
         let config = SyncRegistryConfig {
+            source: registry.source.clone(),
             registry_id: registry.id.clone(),
             url: registry.url.clone(),
             branch: registry.branch.clone(),
@@ -477,10 +500,10 @@ impl Backend {
         if pending.is_empty() {
             return Ok(());
         }
-        let mirror_revision = git(&self.paths.mirror(registry_id), &["rev-parse", "HEAD"])?;
+        let mirror_revision = self.snapshot_revision(registry_id)?;
         let mut result = AutoUpdateResult {
             registry_id: registry_id.to_string(),
-            registry_label: registry_label(&registry),
+            registry_label: self.registry_label(&registry),
             updated: Vec::new(),
             failed: Vec::new(),
         };
@@ -721,6 +744,19 @@ impl Backend {
         })
     }
 
+    fn snapshot_revision(&self, id: &str) -> AppResult<String> {
+        let conn = self.db();
+        let registry =
+            get_registry(&conn, id)?.ok_or_else(|| AppError::not_found("Registry not found"))?;
+        if registry.source == "local" {
+            return get_marker(&conn, id)?
+                .and_then(|marker| marker.last_sync_revision)
+                .ok_or_else(|| AppError::failed("Registry has no snapshot"));
+        }
+        drop(conn);
+        Ok(git(&self.paths.mirror(id), &["rev-parse", "HEAD"])?)
+    }
+
     fn install_locked(
         &self,
         request: &InstallRequest,
@@ -751,7 +787,7 @@ impl Backend {
             }
         }
         let mirror_path = self.paths.mirror(id);
-        let current_revision = git(&mirror_path, &["rev-parse", "HEAD"])?;
+        let current_revision = self.snapshot_revision(id)?;
         let mut request = request.clone();
         if only_update_available {
             let report = self.reconcile_report(
@@ -900,37 +936,65 @@ impl Backend {
     }
 
     pub fn add_registry(&self, request: &AddRegistryRequest) -> AppResult<RegistryRecord> {
-        let canonical = canonicalize_registry_url(&request.url)?;
+        let mut canonical = canonicalize_registry_url(&request.url)?;
+        let local = crate::registry_url::is_local_path(&request.url);
+        if local {
+            let expanded = if request.url.trim() == "~" {
+                self.environment.home.clone()
+            } else if request.url.trim().starts_with("~/") {
+                self.environment.home.join(&request.url.trim()[2..])
+            } else {
+                std::path::PathBuf::from(request.url.trim())
+            };
+            let path = std::fs::canonicalize(expanded).map_err(|error| {
+                AppError::failed(format!("Cannot open registry folder: {error}"))
+            })?;
+            let home = std::fs::canonicalize(&self.environment.home)?;
+            let data = std::fs::canonicalize(&self.paths.root)?;
+            if !path.is_dir() {
+                return Err(AppError::failed("Registry folder must be a directory"));
+            }
+            if path.parent().is_none() || path == home || data.starts_with(&path) {
+                return Err(AppError::failed("Registry folder cannot be the filesystem root, your home folder, or contain the app data folder"));
+            }
+            canonical.url = path.to_string_lossy().into_owned();
+            canonical.canonical_key = format!("local:{}", canonical.url);
+        }
         if let Some(existing) = find_by_canonical_key(&self.db(), &canonical.canonical_key)? {
             return Err(AppError::failed(format!(
                 "A registry for {} is already configured (id {}).",
-                registry_label(&existing),
+                self.registry_label(&existing),
                 existing.id
             )));
         }
-        let branch = match request
-            .branch
-            .as_deref()
-            .map(str::trim)
-            .filter(|b| !b.is_empty())
-        {
-            Some(branch) => branch.to_string(),
-            None => {
-                if !is_git_available() {
-                    return Err(AppError::failed(
-                        "Git is unavailable; specify a branch for this registry.",
-                    ));
-                }
-                detect_default_branch(&canonical.url).map_err(|_| {
-                    AppError::failed(
+        let branch = if local {
+            String::new()
+        } else {
+            match request
+                .branch
+                .as_deref()
+                .map(str::trim)
+                .filter(|b| !b.is_empty())
+            {
+                Some(branch) => branch.to_string(),
+                None => {
+                    if !is_git_available() {
+                        return Err(AppError::failed(
+                            "Git is unavailable; specify a branch for this registry.",
+                        ));
+                    }
+                    detect_default_branch(&canonical.url).map_err(|_| {
+                        AppError::failed(
                         "Could not detect the default branch; specify a branch for this registry.",
                     )
-                })?
+                    })?
+                }
             }
         };
         let stored = insert_registry(
             &self.db(),
             &InsertRegistryInput {
+                source: if local { "local" } else { "git" }.into(),
                 url: canonical.url,
                 branch,
                 enabled: request.enabled.unwrap_or(true),
@@ -983,7 +1047,7 @@ impl Backend {
                 {
                     return Err(AppError::failed(format!(
                         "A registry for {} is already configured (id {}).",
-                        registry_label(&clash),
+                        self.registry_label(&clash),
                         clash.id
                     )));
                 }
