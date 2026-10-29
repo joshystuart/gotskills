@@ -935,16 +935,16 @@ impl Backend {
             .collect()
     }
 
-    pub fn add_registry(&self, request: &AddRegistryRequest) -> AppResult<RegistryRecord> {
-        let mut canonical = canonicalize_registry_url(&request.url)?;
-        let local = crate::registry_url::is_local_path(&request.url);
+    fn canonical_registry(&self, url: &str) -> AppResult<crate::registry_url::CanonicalRegistry> {
+        let mut canonical = canonicalize_registry_url(url)?;
+        let local = crate::registry_url::is_local_path(url);
         if local {
-            let expanded = if request.url.trim() == "~" {
+            let expanded = if url.trim() == "~" {
                 self.environment.home.clone()
-            } else if request.url.trim().starts_with("~/") {
-                self.environment.home.join(&request.url.trim()[2..])
+            } else if url.trim().starts_with("~/") {
+                self.environment.home.join(&url.trim()[2..])
             } else {
-                std::path::PathBuf::from(request.url.trim())
+                std::path::PathBuf::from(url.trim())
             };
             let path = std::fs::canonicalize(expanded).map_err(|error| {
                 AppError::failed(format!("Cannot open registry folder: {error}"))
@@ -960,6 +960,28 @@ impl Backend {
             canonical.url = path.to_string_lossy().into_owned();
             canonical.canonical_key = format!("local:{}", canonical.url);
         }
+        Ok(canonical)
+    }
+
+    fn registry_branch(&self, branch: Option<&str>, url: &str) -> AppResult<String> {
+        if let Some(branch) = branch.map(str::trim).filter(|branch| !branch.is_empty()) {
+            return Ok(branch.to_string());
+        }
+        if !is_git_available() {
+            return Err(AppError::failed(
+                "Git is unavailable; specify a branch for this registry.",
+            ));
+        }
+        detect_default_branch(url).map_err(|_| {
+            AppError::failed(
+                "Could not detect the default branch; specify a branch for this registry.",
+            )
+        })
+    }
+
+    pub fn add_registry(&self, request: &AddRegistryRequest) -> AppResult<RegistryRecord> {
+        let canonical = self.canonical_registry(&request.url)?;
+        let local = crate::registry_url::is_local_path(&request.url);
         if let Some(existing) = find_by_canonical_key(&self.db(), &canonical.canonical_key)? {
             return Err(AppError::failed(format!(
                 "A registry for {} is already configured (id {}).",
@@ -970,26 +992,7 @@ impl Backend {
         let branch = if local {
             String::new()
         } else {
-            match request
-                .branch
-                .as_deref()
-                .map(str::trim)
-                .filter(|b| !b.is_empty())
-            {
-                Some(branch) => branch.to_string(),
-                None => {
-                    if !is_git_available() {
-                        return Err(AppError::failed(
-                            "Git is unavailable; specify a branch for this registry.",
-                        ));
-                    }
-                    detect_default_branch(&canonical.url).map_err(|_| {
-                        AppError::failed(
-                        "Could not detect the default branch; specify a branch for this registry.",
-                    )
-                    })?
-                }
-            }
+            self.registry_branch(request.branch.as_deref(), &canonical.url)?
         };
         let stored = insert_registry(
             &self.db(),
@@ -1041,7 +1044,8 @@ impl Backend {
                 .as_deref()
                 .filter(|url| url.trim() != current.url)
             {
-                let canonical = canonicalize_registry_url(url)?;
+                let canonical = self.canonical_registry(url)?;
+                let local = crate::registry_url::is_local_path(url);
                 if let Some(clash) = find_by_canonical_key(&conn, &canonical.canonical_key)?
                     .filter(|clash| clash.id != current.id)
                 {
@@ -1051,18 +1055,27 @@ impl Backend {
                         clash.id
                     )));
                 }
+                fields.source = Some(if local { "local" } else { "git" }.into());
+                if local {
+                    fields.branch = Some(String::new());
+                } else if current.source == "local" {
+                    fields.branch =
+                        Some(self.registry_branch(request.branch.as_deref(), &canonical.url)?);
+                }
                 fields.url = Some(canonical.url);
                 fields.github_owner = Some(canonical.github_owner);
                 fields.github_repo = Some(canonical.github_repo);
                 fields.canonical_key = Some(canonical.canonical_key);
             }
-            if let Some(branch) = request
-                .branch
-                .as_deref()
-                .map(str::trim)
-                .filter(|b| !b.is_empty() && *b != current.branch)
-            {
-                fields.branch = Some(branch.to_string());
+            if fields.source.as_deref().unwrap_or(&current.source) == "git" {
+                if let Some(branch) = request
+                    .branch
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|b| !b.is_empty() && *b != current.branch)
+                {
+                    fields.branch = Some(branch.to_string());
+                }
             }
             fields.enabled = request.enabled;
             fields.auto_update = request.auto_update;

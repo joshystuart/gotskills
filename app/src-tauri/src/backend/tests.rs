@@ -1162,3 +1162,125 @@ fn local_content_changes_offer_updates_and_conflict_with_git_skills() {
         .iter()
         .any(|entry| entry.state == ReconcileState::UpdateAvailable));
 }
+
+#[test]
+fn registry_switches_between_git_and_local_preserving_settings() {
+    let h = harness();
+    without_default(&h.backend);
+    let remote = remote(&["published"]);
+    let registry = add(&h.backend, remote.path());
+    let mut settings = update(&registry.id);
+    settings.name = Some("My skills".into());
+    settings.colour = Some("#123456".into());
+    settings.auto_update = Some(true);
+    h.backend.update_registry(&settings).unwrap();
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "draft", Some("name: draft\ndescription: Draft"));
+    let mut change = update(&registry.id);
+    change.url = Some("~/drafts".into());
+    change.branch = Some("ignored-for-local".into());
+    let local = h.backend.update_registry(&change).unwrap();
+    assert_eq!(local.source, "local");
+    assert_eq!(local.branch, "");
+    assert_eq!(folders(&h.backend), vec!["draft"]);
+    assert_eq!(local.id, registry.id);
+    assert_eq!(local.name.as_deref(), Some("My skills"));
+    assert_eq!(local.colour.as_deref(), Some("#123456"));
+    assert!(local.auto_update);
+    change.url = Some(format!("file://{}", remote.path().display()));
+    change.branch = None;
+    let git = h.backend.update_registry(&change).unwrap();
+    assert_eq!(git.source, "git");
+    assert_eq!(git.branch, "main");
+    assert_eq!(folders(&h.backend), vec!["published"]);
+    assert_eq!(git.id, registry.id);
+    assert_eq!(git.name, local.name);
+    assert_eq!(git.colour, local.colour);
+    assert!(git.auto_update);
+}
+
+#[test]
+fn registry_source_switch_rejects_duplicates_and_unsafe_folders_without_changes() {
+    let h = harness();
+    without_default(&h.backend);
+    let source = remote(&["published"]);
+    let registry = add(&h.backend, source.path());
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    let local = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: "~/drafts".into(),
+            branch: None,
+            enabled: Some(false),
+        })
+        .unwrap();
+    let alias = h.home.path().join("alias");
+    std::os::unix::fs::symlink(&folder, &alias).unwrap();
+    let mut change = update(&registry.id);
+    change.url = Some(alias.to_string_lossy().into_owned());
+    assert!(h
+        .backend
+        .update_registry(&change)
+        .unwrap_err()
+        .to_string()
+        .contains("already configured"));
+    for path in [
+        "~".to_string(),
+        "/".into(),
+        h.data.path().to_string_lossy().into_owned(),
+    ] {
+        change.url = Some(path);
+        assert!(h
+            .backend
+            .update_registry(&change)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be"));
+    }
+    let unchanged = h.backend.registry(&registry.id).unwrap();
+    assert_eq!(unchanged.source, "git");
+    assert_eq!(unchanged.url, registry.url);
+    assert_eq!(unchanged.branch, registry.branch);
+    assert_eq!(folders(&h.backend), vec!["published"]);
+    let mut change = update(&local.id);
+    change.url = Some(registry.url);
+    assert!(h
+        .backend
+        .update_registry(&change)
+        .unwrap_err()
+        .to_string()
+        .contains("already configured"));
+    assert_eq!(h.backend.registry(&local.id).unwrap().source, "local");
+}
+
+#[test]
+fn local_registry_switch_uses_the_requested_git_branch() {
+    let h = harness();
+    without_default(&h.backend);
+    let source = remote(&["published"]);
+    run_git(source.path(), &["checkout", "-b", "draft"]);
+    write_skill(
+        source.path(),
+        "skills/preview",
+        Some("name: preview\ndescription: Preview"),
+    );
+    commit_all(source.path(), "preview");
+    run_git(source.path(), &["checkout", "main"]);
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: source.path().to_string_lossy().into_owned(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let mut change = update(&registry.id);
+    change.url = Some(format!("file://{}", source.path().display()));
+    change.branch = Some("draft".into());
+    let registry = h.backend.update_registry(&change).unwrap();
+    assert_eq!(registry.source, "git");
+    assert_eq!(registry.branch, "draft");
+    assert_eq!(folders(&h.backend), vec!["preview", "published"]);
+}
