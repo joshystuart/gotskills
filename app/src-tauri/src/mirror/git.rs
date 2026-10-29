@@ -77,25 +77,41 @@ fn apply_sparse_paths(
     mut run: impl FnMut(&Path, &[&str]) -> Result<String, GitError>,
 ) -> Result<(), GitError> {
     let paths = sparse_paths(path, revision)?;
-    let mut args = vec!["sparse-checkout", "set", "--cone", "--"];
+    let mut args = vec!["sparse-checkout", "set", "--"];
     args.extend(paths.iter().map(String::as_str));
     run(path, &args)?;
     Ok(())
 }
 
-/// Whether a mirror has both blob filtering and sparse checkout enabled.
-pub fn is_partial_sparse_mirror(path: &Path) -> bool {
-    let config = ["config", "config.worktree"]
+/// Git config key that marks a full clone made because git lacked partial clone support.
+const FULL_CLONE_FALLBACK_KEY: &str = "gotskills.fullCloneFallback";
+
+fn mirror_config(path: &Path) -> String {
+    ["config", "config.worktree"]
         .iter()
         .filter_map(|name| fs::read_to_string(path.join(".git").join(name)).ok())
         .collect::<Vec<_>>()
-        .join("\n");
-    config.lines().any(|line| {
-        line.trim()
-            .eq_ignore_ascii_case("partialclonefilter = blob:none")
-    }) && config
+        .join("\n")
+}
+
+fn has_config_line(config: &str, expected: &str) -> bool {
+    config
         .lines()
-        .any(|line| line.trim().eq_ignore_ascii_case("sparseCheckout = true"))
+        .any(|line| line.trim().eq_ignore_ascii_case(expected))
+}
+
+fn is_partial_sparse_config(config: &str) -> bool {
+    has_config_line(config, "partialclonefilter = blob:none")
+        && has_config_line(config, "sparseCheckout = true")
+}
+
+fn is_full_clone_fallback_config(config: &str) -> bool {
+    has_config_line(config, "fullCloneFallback = true")
+}
+
+/// Whether a mirror has both blob filtering and sparse checkout enabled.
+pub fn is_partial_sparse_mirror(path: &Path) -> bool {
+    is_partial_sparse_config(&mirror_config(path))
 }
 
 fn unsupported_partial_clone(error: &GitError) -> bool {
@@ -133,6 +149,7 @@ fn clone_mirror_with(
             &path_text,
         ],
     )
+    .and_then(|_| run(Some(path), &["sparse-checkout", "init", "--cone"]))
     .and_then(|_| apply_sparse_paths(path, "HEAD", |cwd, args| run(Some(cwd), args)));
     match partial {
         Ok(_) => {
@@ -154,6 +171,7 @@ fn clone_mirror_with(
                     &path_text,
                 ],
             )?;
+            run(Some(path), &["config", FULL_CLONE_FALLBACK_KEY, "true"])?;
             Ok(())
         }
         Err(error) => Err(error),
@@ -189,6 +207,7 @@ pub fn ensure_mirror(config: &MirrorConfig) -> Result<String, GitError> {
 }
 
 /// Fetch a mirror, skipping checkout only when its fetched head matches a successful revision.
+/// A full-clone fallback mirror is kept and fetched rather than re-cloned on every sync.
 pub fn ensure_mirror_since(
     config: &MirrorConfig,
     successful_revision: Option<&str>,
@@ -197,7 +216,9 @@ pub fn ensure_mirror_since(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    if !path.exists() || !is_partial_sparse_mirror(path) {
+    let mirror = mirror_config(path);
+    let sparse = is_partial_sparse_config(&mirror);
+    if !path.exists() || !(sparse || is_full_clone_fallback_config(&mirror)) {
         replace_mirror(config)?;
     } else {
         git(path, &["remote", "set-url", "origin", &config.url])?;
@@ -211,7 +232,9 @@ pub fn ensure_mirror_since(
         if successful_revision == Some(revision.as_str()) {
             return Ok((revision, true));
         }
-        apply_sparse_paths(path, &origin_branch, git)?;
+        if sparse {
+            apply_sparse_paths(path, &origin_branch, git)?;
+        }
         git(path, &["checkout", "-B", &config.branch, &origin_branch])?;
         git(path, &["reset", "--hard", &origin_branch])?;
     }
@@ -348,6 +371,10 @@ mod tests {
                 ),
                 "+refs/heads/main:refs/remotes/origin/main"
             );
+            let kept = config.mirror_path.join(".git/kept");
+            fs::write(&kept, "").unwrap();
+            ensure_mirror(&config).unwrap();
+            assert!(kept.exists(), "fallback mirror was re-cloned");
         }
     }
 
