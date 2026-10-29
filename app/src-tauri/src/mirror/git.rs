@@ -71,11 +71,15 @@ fn sparse_paths(path: &Path, revision: &str) -> Result<Vec<String>, GitError> {
     Ok(paths.into_iter().collect())
 }
 
-fn apply_sparse_paths(path: &Path, revision: &str) -> Result<(), GitError> {
+fn apply_sparse_paths(
+    path: &Path,
+    revision: &str,
+    mut run: impl FnMut(&Path, &[&str]) -> Result<String, GitError>,
+) -> Result<(), GitError> {
     let paths = sparse_paths(path, revision)?;
     let mut args = vec!["sparse-checkout", "set", "--cone", "--"];
     args.extend(paths.iter().map(String::as_str));
-    git(path, &args)?;
+    run(path, &args)?;
     Ok(())
 }
 
@@ -129,12 +133,7 @@ fn clone_mirror_with(
             &path_text,
         ],
     )
-    .and_then(|_| {
-        let paths = sparse_paths(path, "HEAD")?;
-        let mut args = vec!["sparse-checkout", "set", "--cone", "--"];
-        args.extend(paths.iter().map(String::as_str));
-        run(Some(path), &args)
-    });
+    .and_then(|_| apply_sparse_paths(path, "HEAD", |cwd, args| run(Some(cwd), args)));
     match partial {
         Ok(_) => {
             run(Some(path), &["reset", "--hard", "HEAD"])?;
@@ -212,7 +211,7 @@ pub fn ensure_mirror_since(
         if successful_revision == Some(revision.as_str()) {
             return Ok((revision, true));
         }
-        apply_sparse_paths(path, &origin_branch)?;
+        apply_sparse_paths(path, &origin_branch, git)?;
         git(path, &["checkout", "-B", &config.branch, &origin_branch])?;
         git(path, &["reset", "--hard", &origin_branch])?;
     }

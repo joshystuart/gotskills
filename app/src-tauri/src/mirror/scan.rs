@@ -172,6 +172,8 @@ pub fn scan_skills(mirror_path: &Path) -> Vec<ScannedSkill> {
             "--name-only",
             "-z",
             "--pretty=raw",
+            "--no-color",
+            "--root",
             "--log-size",
             "--",
         ];
@@ -231,6 +233,44 @@ mod tests {
 
     fn ids(skills: &[ScannedSkill]) -> Vec<&str> {
         skills.iter().map(|s| s.id.as_str()).collect()
+    }
+
+    #[test]
+    fn scans_skills_when_git_always_colors_output() {
+        let repo = make_repo();
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Colored history"),
+        );
+        commit_all(repo.path(), "add skill");
+        let sha = run_git(repo.path(), &["rev-parse", "HEAD"]);
+        let date = run_git(repo.path(), &["log", "-1", "--format=%cI"]);
+        run_git(repo.path(), &["config", "--local", "color.ui", "always"]);
+
+        let found = scan_skills(repo.path());
+        assert_eq!(ids(&found), vec!["alpha"]);
+        assert_eq!(found[0].provenance_sha, sha);
+        assert_eq!(found[0].updated_at, date);
+    }
+
+    #[test]
+    fn scans_root_commit_skills_when_git_hides_root_changes() {
+        let repo = make_repo();
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Root history"),
+        );
+        commit_all(repo.path(), "add skill");
+        let sha = run_git(repo.path(), &["rev-parse", "HEAD"]);
+        let date = run_git(repo.path(), &["log", "-1", "--format=%cI"]);
+        run_git(repo.path(), &["config", "--local", "log.showRoot", "false"]);
+
+        let found = scan_skills(repo.path());
+        assert_eq!(ids(&found), vec!["alpha"]);
+        assert_eq!(found[0].provenance_sha, sha);
+        assert_eq!(found[0].updated_at, date);
     }
 
     #[test]
