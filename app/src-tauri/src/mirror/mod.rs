@@ -14,6 +14,7 @@ pub mod discovery {
 pub mod git;
 pub mod git_errors;
 pub mod git_exec;
+pub mod local;
 pub mod scan;
 pub mod skill_files;
 pub mod sync;
