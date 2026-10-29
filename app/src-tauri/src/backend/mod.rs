@@ -151,6 +151,7 @@ fn marker_status_for(reason: SyncFailureReason) -> SyncMarkerStatus {
         SyncFailureReason::Offline => SyncMarkerStatus::Offline,
         SyncFailureReason::Empty => SyncMarkerStatus::Empty,
         SyncFailureReason::AccessRequired => SyncMarkerStatus::AccessRequired,
+        SyncFailureReason::FolderNotFound => SyncMarkerStatus::FolderNotFound,
     }
 }
 
@@ -430,7 +431,11 @@ impl Backend {
                 self.telemetry.emit(&conn, event)?;
             }
             Err(error) => {
-                let reason = classify_git_error(&redact_git_error(&error.message));
+                let reason = if registry.source == "local" {
+                    SyncFailureReason::FolderNotFound
+                } else {
+                    classify_git_error(&redact_git_error(&error.message))
+                };
                 record_sync_failure(&conn, &registry.id, marker_status_for(reason))?;
             }
         }

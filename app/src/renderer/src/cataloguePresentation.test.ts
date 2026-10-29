@@ -354,3 +354,26 @@ describe('registryColour', () => {
     expect(colours.size).toBeGreaterThan(1)
   })
 })
+
+it('names missing folders in registry status and full or partial catalogue banners', () => {
+  const missing = regStatus({
+    phase: 'failed',
+    reason: 'folder-not-found',
+    folderPath: '/skills/drafts',
+    stale: true,
+  })
+  expect(registryStatusLabel(missing).text).toBe(
+    'Folder not found: /skills/drafts — showing last snapshot'
+  )
+  for (const phase of ['failed', 'partial'] as const) {
+    const banner = bannerMessage(
+      syncStatus({
+        phase,
+        reason: phase === 'failed' ? 'folder-not-found' : undefined,
+        registries: [missing],
+      })
+    )
+    expect(banner).toContain('Folder not found: /skills/drafts')
+    expect(banner).not.toContain('system Git')
+  }
+})

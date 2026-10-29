@@ -150,6 +150,7 @@ mod tests {
             colour: None,
             name: None,
             sync_status: RegistrySyncStatus {
+                folder_path: None,
                 registry_id: "r1".into(),
                 phase: SyncPhase::Synced,
                 last_synced_at: None,

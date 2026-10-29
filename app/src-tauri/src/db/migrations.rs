@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use super::transaction::transaction;
 
 /// Numbered migrations applied in order via `PRAGMA user_version`.
-pub const MIGRATIONS: [(i64, &str); 12] = [
+pub const MIGRATIONS: [(i64, &str); 13] = [
     (1, include_str!("migrations/001_schema.sql")),
     (2, include_str!("migrations/002_telemetry.sql")),
     (3, include_str!("migrations/003_telemetry_targets.sql")),
@@ -16,10 +16,11 @@ pub const MIGRATIONS: [(i64, &str); 12] = [
     (10, include_str!("migrations/010_registry_name.sql")),
     (11, include_str!("migrations/011_drop_version.sql")),
     (12, include_str!("migrations/012_registry_source.sql")),
+    (13, include_str!("migrations/013_folder_not_found.sql")),
 ];
 
 /// The schema version of a fully migrated database.
-pub const SCHEMA_VERSION: i64 = 12;
+pub const SCHEMA_VERSION: i64 = 13;
 
 /// The stored `user_version`.
 pub fn user_version(conn: &Connection) -> rusqlite::Result<i64> {

@@ -55,7 +55,17 @@ export function syncLabel(status: SyncStatus): { glyph: string; text: string } {
   }
 }
 
+function missingFolderLabel(status: RegistrySyncStatus): string {
+  return status.folderPath ? `Folder not found: ${status.folderPath}` : 'Folder not found'
+}
+
 export function bannerMessage(status: SyncStatus): string | null {
+  const missingFolders = status.registries
+    .filter((registry) => registry.phase === 'failed' && registry.reason === 'folder-not-found')
+    .map(missingFolderLabel)
+  if ((status.phase === 'partial' || status.phase === 'failed') && missingFolders.length > 0) {
+    return `${missingFolders.join('; ')} — showing the latest available skills. Open Settings to review each registry.`
+  }
   if (status.phase === 'partial') {
     return 'Some registries could not be synced — showing the latest available skills. Open Settings to review each registry.'
   }
@@ -63,6 +73,8 @@ export function bannerMessage(status: SyncStatus): string | null {
   switch (status.reason) {
     case 'offline':
       return `Couldn't reach the registry — showing cached catalogue (${formatLastSynced(status.lastSyncedAt)}).`
+    case 'folder-not-found':
+      return 'Folder not found — showing the latest available skills.'
     case 'empty':
       return 'No skills found — check the repo URL in Settings.'
     case 'access-required':
@@ -79,11 +91,13 @@ export function registryStatusLabel(status: RegistrySyncStatus): { glyph: string
       return { glyph: '↻', text: 'Syncing…' }
     case 'failed': {
       const base =
-        status.reason === 'access-required'
-          ? ACCESS_REQUIRED_TITLE
-          : status.reason === 'empty'
-            ? 'No skills found'
-            : 'Offline'
+        status.reason === 'folder-not-found'
+          ? missingFolderLabel(status)
+          : status.reason === 'access-required'
+            ? ACCESS_REQUIRED_TITLE
+            : status.reason === 'empty'
+              ? 'No skills found'
+              : 'Offline'
       return { glyph: '×', text: status.stale ? `${base} — showing last snapshot` : base }
     }
     case 'synced':

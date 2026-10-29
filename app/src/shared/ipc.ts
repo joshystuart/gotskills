@@ -12,9 +12,10 @@ export type CatalogueSyncPhase = SyncPhase | 'partial'
  * `access-required` covers GitHub's ambiguous not-found / auth failures —
  * the app cannot distinguish them and must not claim it can.
  */
-export type SyncFailureReason = 'offline' | 'empty' | 'access-required'
+export type SyncFailureReason = 'offline' | 'empty' | 'access-required' | 'folder-not-found'
 
 export interface RegistrySyncStatus {
+  folderPath?: string
   registryId: string
   phase: SyncPhase
   /** ISO-8601 of the last successful sync for this Registry, or null if never. */

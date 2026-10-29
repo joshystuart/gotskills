@@ -1284,3 +1284,45 @@ fn local_registry_switch_uses_the_requested_git_branch() {
     assert_eq!(registry.branch, "draft");
     assert_eq!(folders(&h.backend), vec!["preview", "published"]);
 }
+
+#[test]
+fn missing_local_folder_keeps_snapshot_and_recovers() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: "~/drafts".into(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let saved = h.home.path().join("saved-drafts");
+    fs::rename(&folder, &saved).unwrap();
+    let status = h.backend.sync_registry(&registry.id).unwrap();
+    assert_eq!(
+        serde_json::to_value(&status).unwrap()["reason"],
+        "folder-not-found"
+    );
+    assert_eq!(
+        serde_json::to_value(&status).unwrap()["folderPath"],
+        registry.url
+    );
+    assert_eq!(status.stale, Some(true));
+    assert_eq!(status.revision, registry.sync_status.revision);
+    assert_eq!(folders(&h.backend), vec!["alpha"]);
+    assert!(h.backend.get_catalogue().unwrap().skills[0].stale);
+    let mut request = install_request(&registry, "alpha", &["~/.agents/skills"]);
+    request.acknowledge_stale = Some(true);
+    h.backend.install(&request).unwrap();
+    fs::rename(&saved, &folder).unwrap();
+    let recovered = h.backend.sync_registry(&registry.id).unwrap();
+    assert_eq!(recovered.phase, SyncPhase::Synced);
+    assert_eq!(recovered.stale, Some(false));
+    assert_eq!(recovered.reason, None);
+    assert_eq!(recovered.folder_path, None);
+    assert!(!h.backend.get_catalogue().unwrap().skills[0].stale);
+}

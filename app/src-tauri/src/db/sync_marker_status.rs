@@ -9,6 +9,7 @@ pub enum SyncMarkerStatus {
     Offline,
     Empty,
     AccessRequired,
+    FolderNotFound,
 }
 
 impl SyncMarkerStatus {
@@ -20,6 +21,7 @@ impl SyncMarkerStatus {
             SyncMarkerStatus::Offline => "offline",
             SyncMarkerStatus::Empty => "empty",
             SyncMarkerStatus::AccessRequired => "access_required",
+            SyncMarkerStatus::FolderNotFound => "folder_not_found",
         }
     }
 
@@ -31,6 +33,7 @@ impl SyncMarkerStatus {
             "offline" => Ok(SyncMarkerStatus::Offline),
             "empty" => Ok(SyncMarkerStatus::Empty),
             "access_required" => Ok(SyncMarkerStatus::AccessRequired),
+            "folder_not_found" => Ok(SyncMarkerStatus::FolderNotFound),
             other => Err(UnknownSyncMarkerStatus(other.to_string())),
         }
     }

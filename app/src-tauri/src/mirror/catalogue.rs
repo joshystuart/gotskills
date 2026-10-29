@@ -5,7 +5,8 @@ use rusqlite::Connection;
 use crate::db::SyncMarkerStatus;
 use crate::error::AppResult;
 use crate::registries::{
-    get_marker, list_registries, record_marker_failure, registry_label, StoredRegistry,
+    get_marker, get_registry, list_registries, record_marker_failure, registry_label,
+    StoredRegistry,
 };
 use crate::short_sha::short_sha;
 use crate::types::{
@@ -40,6 +41,7 @@ pub fn registry_sync_status_from_marker(
     let count = visible_skill_count(conn, registry_id)?;
     let Some(marker) = marker.filter(|marker| marker.status != SyncMarkerStatus::Never) else {
         return Ok(RegistrySyncStatus {
+            folder_path: None,
             registry_id: registry_id.to_string(),
             phase: SyncPhase::Synced,
             last_synced_at: None,
@@ -53,11 +55,19 @@ pub fn registry_sync_status_from_marker(
         SyncMarkerStatus::Ok | SyncMarkerStatus::Never => (SyncPhase::Synced, None),
         SyncMarkerStatus::Offline => (SyncPhase::Failed, Some(SyncFailureReason::Offline)),
         SyncMarkerStatus::Empty => (SyncPhase::Failed, Some(SyncFailureReason::Empty)),
+        SyncMarkerStatus::FolderNotFound => {
+            (SyncPhase::Failed, Some(SyncFailureReason::FolderNotFound))
+        }
         SyncMarkerStatus::AccessRequired => {
             (SyncPhase::Failed, Some(SyncFailureReason::AccessRequired))
         }
     };
     Ok(RegistrySyncStatus {
+        folder_path: if reason == Some(SyncFailureReason::FolderNotFound) {
+            get_registry(conn, registry_id)?.map(|registry| registry.url)
+        } else {
+            None
+        },
         registry_id: registry_id.to_string(),
         phase,
         last_synced_at: marker.last_sync_at,
@@ -341,6 +351,7 @@ mod tests {
 
     fn ok(id: &str, at: &str, revision: &str) -> RegistrySyncStatus {
         RegistrySyncStatus {
+            folder_path: None,
             registry_id: id.into(),
             phase: SyncPhase::Synced,
             last_synced_at: Some(at.into()),
@@ -353,6 +364,7 @@ mod tests {
 
     fn failed(id: &str, reason: SyncFailureReason) -> RegistrySyncStatus {
         RegistrySyncStatus {
+            folder_path: None,
             registry_id: id.into(),
             phase: SyncPhase::Failed,
             last_synced_at: None,
@@ -390,6 +402,7 @@ mod tests {
     #[test]
     fn aggregate_is_syncing_when_any_registry_is_syncing() {
         let syncing = RegistrySyncStatus {
+            folder_path: None,
             registry_id: "b".into(),
             phase: SyncPhase::Syncing,
             last_synced_at: None,

@@ -50,11 +50,14 @@ pub enum SyncFailureReason {
     Offline,
     Empty,
     AccessRequired,
+    FolderNotFound,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrySyncStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_path: Option<String>,
     pub registry_id: String,
     pub phase: SyncPhase,
     pub last_synced_at: Option<String>,
@@ -639,6 +642,7 @@ mod tests {
     #[test]
     fn optional_status_fields_are_omitted_not_null() {
         let status = RegistrySyncStatus {
+            folder_path: None,
             registry_id: "r".into(),
             phase: SyncPhase::Synced,
             last_synced_at: None,
