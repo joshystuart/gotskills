@@ -388,12 +388,16 @@ export interface RegistryMenuApi {
   showRegistryMenu(req: RegistryMenuRequest): Promise<RegistryMenuAction | null>
 }
 
+export interface SyncSettingsApi {
+  getSyncConcurrency(): Promise<number>
+  setSyncConcurrency(concurrency: number): Promise<void>
+}
+
 export type Unsubscribe = () => void
 
 /** What the renderer actually receives on window.api: requests + event subscriptions. */
-export interface RendererApi extends AppApi, AppUpdateApi, AppearanceApi, RegistryMenuApi {
-  getSyncConcurrency(): Promise<number>
-  setSyncConcurrency(concurrency: number): Promise<void>
+export interface RendererApi
+  extends AppApi, AppUpdateApi, AppearanceApi, RegistryMenuApi, SyncSettingsApi {
   onAppUpdateState(cb: (state: AppUpdateState) => void): Unsubscribe
   onSyncStatus(cb: (status: SyncStatus) => void): Unsubscribe
   onCatalogueUpdated(cb: () => void): Unsubscribe

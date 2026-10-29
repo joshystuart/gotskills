@@ -42,7 +42,6 @@ pub fn write_scan_to_db(
     registry_id: &str,
     revision: &str,
     skills: &[ScannedSkill],
-    _mirror_path: &std::path::Path,
 ) -> Result<SyncWriteResult, GitError> {
     let at = now();
     let status = if skills.is_empty() {
@@ -161,14 +160,8 @@ pub fn sync_registry(
             skipped,
         });
     }
-    let skills = scan_skills(&config.mirror_path);
-    write_scan_to_db(
-        conn,
-        &config.registry_id,
-        &revision,
-        &skills,
-        &config.mirror_path,
-    )
+    let skills = scan_skills(&config.mirror_path)?;
+    write_scan_to_db(conn, &config.registry_id, &revision, &skills)
 }
 
 #[cfg(test)]
@@ -249,28 +242,32 @@ mod tests {
             .collect()
     }
 
+    fn mark_skills_seen(conn: &Connection) {
+        conn.execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
+            .unwrap();
+    }
+
+    fn count_unrefreshed(conn: &Connection) -> u32 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM skill WHERE last_seen_at = 'sentinel'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn unchanged_sync_preserves_skill_rows_with_three_git_calls() {
         let remote = make_remote();
         let fx = fixture(remote.path());
         sync_registry(&fx.conn, &fx.config).unwrap();
-        fx.conn
-            .execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
-            .unwrap();
+        mark_skills_seen(&fx.conn);
         let (result, calls) = crate::mirror::git_exec::count_git_invocations(|| {
             sync_registry(&fx.conn, &fx.config).unwrap()
         });
         assert_eq!(result.visible_skill_count, 2);
         assert!(calls <= 3, "unchanged sync used {calls} git calls");
-        let untouched: u32 = fx
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM skill WHERE last_seen_at = 'sentinel'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(untouched, 2);
+        assert_eq!(count_unrefreshed(&fx.conn), 2);
     }
 
     #[test]
@@ -288,9 +285,7 @@ mod tests {
                 .collect()
         };
         let before = hashes();
-        fx.conn
-            .execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
-            .unwrap();
+        mark_skills_seen(&fx.conn);
         fs::write(
             remote.path().join("README.md"),
             "only documentation changed",
@@ -301,15 +296,7 @@ mod tests {
         assert!(!next.skipped);
         assert_ne!(first.revision, next.revision);
         assert_eq!(hashes(), before);
-        let untouched: u32 = fx
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM skill WHERE last_seen_at = 'sentinel'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(untouched, 0);
+        assert_eq!(count_unrefreshed(&fx.conn), 0);
     }
 
     #[test]
@@ -328,20 +315,10 @@ mod tests {
             SyncMarkerStatus::Offline,
         )
         .unwrap();
-        fx.conn
-            .execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
-            .unwrap();
+        mark_skills_seen(&fx.conn);
         let result = sync_registry(&fx.conn, &fx.config).unwrap();
         assert!(!result.skipped);
-        let untouched: u32 = fx
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM skill WHERE last_seen_at = 'sentinel'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(untouched, 0);
+        assert_eq!(count_unrefreshed(&fx.conn), 0);
         assert!(
             !get_marker(&fx.conn, &fx.config.registry_id)
                 .unwrap()
@@ -362,24 +339,14 @@ mod tests {
             fx.config.mirror_path.to_str().unwrap(),
         ])
         .unwrap();
-        fx.conn
-            .execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
-            .unwrap();
+        mark_skills_seen(&fx.conn);
         let result = sync_registry(&fx.conn, &fx.config).unwrap();
         assert!(!result.skipped);
         assert_eq!(result.revision, first.revision);
         assert!(crate::mirror::git::is_partial_sparse_mirror(
             &fx.config.mirror_path
         ));
-        let untouched: u32 = fx
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM skill WHERE last_seen_at = 'sentinel'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(untouched, 0);
+        assert_eq!(count_unrefreshed(&fx.conn), 0);
     }
 
     #[test]
@@ -475,7 +442,7 @@ mod tests {
             .mirror_path
             .join("plugins/demo/.claude-plugin/plugin.json")
             .exists());
-        let skills = scan_skills(&fx.config.mirror_path);
+        let skills = scan_skills(&fx.config.mirror_path).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].plugin_name.as_deref(), Some("demo"));
     }

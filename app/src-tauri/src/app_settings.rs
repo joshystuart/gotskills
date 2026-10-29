@@ -5,6 +5,9 @@ use crate::types::{Appearance, AppearancePatch, FontSize, Theme};
 const AUTO_DOWNLOAD_KEY: &str = "app-update-auto-download";
 const THEME_KEY: &str = "theme";
 const FONT_SIZE_KEY: &str = "font-size";
+const SYNC_CONCURRENCY_KEY: &str = "sync-concurrency";
+const SYNC_CONCURRENCY_RANGE: std::ops::RangeInclusive<usize> = 1..=8;
+const DEFAULT_SYNC_CONCURRENCY: usize = 4;
 
 fn read_setting(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row(
@@ -26,20 +29,26 @@ fn write_setting(conn: &Connection, key: &str, value: &str) -> rusqlite::Result<
     Ok(())
 }
 
+fn valid_sync_concurrency(concurrency: usize) -> usize {
+    if SYNC_CONCURRENCY_RANGE.contains(&concurrency) {
+        concurrency
+    } else {
+        DEFAULT_SYNC_CONCURRENCY
+    }
+}
+
 pub fn get_sync_concurrency(conn: &Connection) -> usize {
-    read_setting(conn, "sync-concurrency")
+    read_setting(conn, SYNC_CONCURRENCY_KEY)
         .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| (1..=8).contains(value))
-        .unwrap_or(4)
+        .map_or(DEFAULT_SYNC_CONCURRENCY, valid_sync_concurrency)
 }
 
 pub fn set_sync_concurrency(conn: &Connection, concurrency: usize) -> rusqlite::Result<()> {
-    let value = if (1..=8).contains(&concurrency) {
-        concurrency
-    } else {
-        4
-    };
-    write_setting(conn, "sync-concurrency", &value.to_string())
+    write_setting(
+        conn,
+        SYNC_CONCURRENCY_KEY,
+        &valid_sync_concurrency(concurrency).to_string(),
+    )
 }
 
 /// Whether app updates download automatically (default true).
