@@ -5,6 +5,9 @@ use crate::types::{Appearance, AppearancePatch, FontSize, Theme};
 const AUTO_DOWNLOAD_KEY: &str = "app-update-auto-download";
 const THEME_KEY: &str = "theme";
 const FONT_SIZE_KEY: &str = "font-size";
+const SYNC_CONCURRENCY_KEY: &str = "sync-concurrency";
+const SYNC_CONCURRENCY_RANGE: std::ops::RangeInclusive<usize> = 1..=8;
+const DEFAULT_SYNC_CONCURRENCY: usize = 4;
 
 fn read_setting(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row(
@@ -24,6 +27,28 @@ fn write_setting(conn: &Connection, key: &str, value: &str) -> rusqlite::Result<
         [key, value],
     )?;
     Ok(())
+}
+
+fn valid_sync_concurrency(concurrency: usize) -> usize {
+    if SYNC_CONCURRENCY_RANGE.contains(&concurrency) {
+        concurrency
+    } else {
+        DEFAULT_SYNC_CONCURRENCY
+    }
+}
+
+pub fn get_sync_concurrency(conn: &Connection) -> usize {
+    read_setting(conn, SYNC_CONCURRENCY_KEY)
+        .and_then(|value| value.parse::<usize>().ok())
+        .map_or(DEFAULT_SYNC_CONCURRENCY, valid_sync_concurrency)
+}
+
+pub fn set_sync_concurrency(conn: &Connection, concurrency: usize) -> rusqlite::Result<()> {
+    write_setting(
+        conn,
+        SYNC_CONCURRENCY_KEY,
+        &valid_sync_concurrency(concurrency).to_string(),
+    )
 }
 
 /// Whether app updates download automatically (default true).
@@ -66,6 +91,22 @@ pub fn set_appearance(conn: &Connection, patch: AppearancePatch) -> rusqlite::Re
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
+
+    #[test]
+    fn sync_concurrency_defaults_and_round_trips() {
+        let db = open_in_memory().unwrap();
+        assert_eq!(get_sync_concurrency(&db), 4);
+        for value in 1..=8 {
+            set_sync_concurrency(&db, value).unwrap();
+            assert_eq!(get_sync_concurrency(&db), value);
+        }
+        for value in ["0", "9", "-1", "no", "2.5"] {
+            write_setting(&db, "sync-concurrency", value).unwrap();
+            assert_eq!(get_sync_concurrency(&db), 4);
+        }
+        db.execute("DROP TABLE app_setting", []).unwrap();
+        assert_eq!(get_sync_concurrency(&db), 4);
+    }
 
     fn appearance(theme: Theme, font_size: FontSize) -> Appearance {
         Appearance { theme, font_size }

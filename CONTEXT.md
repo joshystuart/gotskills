@@ -45,7 +45,7 @@ A registry-scoped catalogue entry identified by its registry and install key (th
 _Avoid_: Installed skill
 
 **Skill Path**:
-The POSIX-relative path from a registry mirror root to the skill directory containing `SKILL.md`. Used for git provenance (content-hash, version history) and stored as `skill_path` in the database. May differ from the install key for nested catalog layouts (e.g. `skills/engineering/code-review/` with install key `code-review`).
+The POSIX-relative path from a registry mirror root to the skill directory containing `SKILL.md`. Used for git provenance (last-touching commit, content hash) and stored as `skill_path` in the database. May differ from the install key for nested catalog layouts (e.g. `skills/engineering/code-review/` with install key `code-review`).
 
 **Skill Conflict**:
 The condition where multiple registries supply skills with the same folder name. All remain visible in the catalogue.

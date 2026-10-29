@@ -44,6 +44,7 @@ interface SettingsViewProps {
   agents: SupportedAgent[]
   appearanceSettings: JSX.Element
   appUpdateSettings: JSX.Element
+  syncSettings: JSX.Element
   registryBusy: boolean
   registryError: string | null
   highlightedRegistryId: string | null
@@ -424,6 +425,7 @@ export function SettingsView({
   agents,
   appearanceSettings,
   appUpdateSettings,
+  syncSettings,
   registryBusy,
   registryError,
   highlightedRegistryId,
@@ -440,6 +442,7 @@ export function SettingsView({
       <div className="settings-panel">
         {appearanceSettings}
         {appUpdateSettings}
+        {syncSettings}
         <section className="settings-section" aria-label="Registries">
           <h2 className="settings-subtitle">Registries</h2>
           <p className="settings-lead">

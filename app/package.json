@@ -1,6 +1,6 @@
 {
   "name": "got-skills",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "description": "Got Skills \u2014 internal app store for agent skills (Phase 0 PoC)",
   "author": "Got Skills",
   "scripts": {

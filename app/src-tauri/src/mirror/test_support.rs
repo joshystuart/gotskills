@@ -38,3 +38,15 @@ pub fn write_skill(root: &Path, relative_dir: &str, frontmatter: Option<&str>) {
     };
     fs::write(dir.join("SKILL.md"), content).unwrap();
 }
+
+/// Last commit date, optionally limited to a path, as the scanner formats it, whatever git's ISO style.
+pub fn last_commit_date(cwd: &Path, path: Option<&str>) -> String {
+    let mut args = vec!["log", "-1", "--format=%cI"];
+    if let Some(path) = path {
+        args.extend(["--", path]);
+    }
+    chrono::DateTime::parse_from_rfc3339(&git(cwd, &args))
+        .expect("strict ISO commit date")
+        .format("%Y-%m-%dT%H:%M:%S%:z")
+        .to_string()
+}

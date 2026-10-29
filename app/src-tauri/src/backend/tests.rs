@@ -729,6 +729,29 @@ fn auto_update_brings_installed_skills_current_and_reports_it() {
 }
 
 #[test]
+fn unchanged_sync_is_synced_without_running_auto_update() {
+    let h = harness();
+    without_default(&h.backend);
+    let source = remote(&["alpha"]);
+    let registry = add(&h.backend, source.path());
+    h.backend
+        .install(&install_request(&registry, "alpha", &["~/.claude/skills"]))
+        .unwrap();
+    change_remote(source.path(), &["alpha"], "changed");
+    h.backend.sync_registry(&registry.id).unwrap();
+    let mut enable = update(&registry.id);
+    enable.auto_update = Some(true);
+    h.backend.update_registry(&enable).unwrap();
+    h.backend.sync_registry(&registry.id).unwrap();
+    let status = current(&h.backend, &registry.id).sync_status;
+    assert_eq!(status.phase, SyncPhase::Synced);
+    assert_eq!(status.stale, Some(false));
+    assert!(h.events.auto_updates.lock().unwrap().is_empty());
+    let body = fs::read_to_string(h.home.path().join(".claude/skills/alpha/SKILL.md")).unwrap();
+    assert!(!body.contains("description: changed"));
+}
+
+#[test]
 fn without_auto_update_a_sync_leaves_installs_behind() {
     let h = harness();
     without_default(&h.backend);
@@ -879,4 +902,135 @@ fn the_installation_id_lives_in_the_data_directory() {
         fs::read_to_string(id).unwrap().trim(),
         h.backend.telemetry().installation_id
     );
+}
+
+#[test]
+fn refresh_respects_concurrency_and_uses_the_next_setting() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let testing = Arc::new(AtomicBool::new(false));
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let sync: SyncFn = {
+        let testing = testing.clone();
+        let active = active.clone();
+        let peak = peak.clone();
+        Arc::new(move |_, _| {
+            if testing.load(Ordering::SeqCst) {
+                let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(count, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(30));
+                active.fetch_sub(1, Ordering::SeqCst);
+            }
+            Err(GitError {
+                message: "offline".into(),
+            })
+        })
+    };
+    let h = harness_with(Some(sync));
+    without_default(&h.backend);
+    for _ in 0..5 {
+        let remote = remote(&["skill"]);
+        add(&h.backend, remote.path());
+    }
+    testing.store(true, Ordering::SeqCst);
+    h.backend.set_sync_concurrency(2).unwrap();
+    h.backend.refresh().unwrap();
+    assert_eq!(peak.swap(0, Ordering::SeqCst), 2);
+    h.backend.set_sync_concurrency(1).unwrap();
+    h.backend.refresh().unwrap();
+    assert_eq!(peak.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn installing_another_registry_does_not_wait_for_a_running_sync() {
+    use std::sync::mpsc;
+    let blocked = Arc::new(Mutex::new(None::<String>));
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let sync: SyncFn = {
+        let blocked = blocked.clone();
+        let release_rx = Mutex::new(release_rx);
+        Arc::new(move |conn, config| {
+            if blocked.lock().unwrap().as_ref() == Some(&config.registry_id) {
+                started_tx.send(()).unwrap();
+                release_rx.lock().unwrap().recv().unwrap();
+            }
+            sync_registry(conn, config)
+        })
+    };
+    let h = harness_with(Some(sync));
+    without_default(&h.backend);
+    let first_remote = remote(&["first"]);
+    let second_remote = remote(&["second"]);
+    let first = add(&h.backend, first_remote.path());
+    let second = add(&h.backend, second_remote.path());
+    *blocked.lock().unwrap() = Some(first.id.clone());
+    std::thread::scope(|scope| {
+        let syncing = scope.spawn(|| h.backend.sync_registry(&first.id));
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (installed_tx, installed_rx) = mpsc::channel();
+        let backend = &h.backend;
+        let installing = scope.spawn(move || {
+            let result =
+                backend.install(&install_request(&second, "second", &["~/.claude/skills"]));
+            installed_tx.send(result).unwrap();
+        });
+        let installed = installed_rx.recv_timeout(Duration::from_secs(5));
+        release_tx.send(()).unwrap();
+        syncing.join().unwrap().unwrap();
+        installing.join().unwrap();
+        assert!(installed.unwrap().is_ok());
+    });
+    assert!(h
+        .home
+        .path()
+        .join(".claude/skills/second/SKILL.md")
+        .exists());
+}
+
+#[test]
+fn changing_concurrency_does_not_interrupt_the_current_refresh() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    let testing = Arc::new(AtomicBool::new(false));
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let sync: SyncFn = {
+        let testing = testing.clone();
+        let release_rx = Mutex::new(release_rx);
+        Arc::new(move |_, _| {
+            if testing.load(Ordering::SeqCst) {
+                started_tx.send(()).unwrap();
+                release_rx.lock().unwrap().recv().unwrap();
+            }
+            Err(GitError::new("offline"))
+        })
+    };
+    let h = harness_with(Some(sync));
+    without_default(&h.backend);
+    let sources: Vec<_> = (0..4).map(|_| remote(&["skill"])).collect();
+    for source in &sources {
+        add(&h.backend, source.path());
+    }
+    h.backend.set_sync_concurrency(2).unwrap();
+    testing.store(true, Ordering::SeqCst);
+    std::thread::scope(|scope| {
+        let refresh = scope.spawn(|| h.backend.refresh());
+        for _ in 0..2 {
+            started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+        h.backend.set_sync_concurrency(1).unwrap();
+        for _ in 0..2 {
+            release_tx.send(()).unwrap();
+        }
+        let pending: Vec<_> = (0..2)
+            .map(|_| started_rx.recv_timeout(Duration::from_secs(5)))
+            .collect();
+        for _ in 0..2 {
+            release_tx.send(()).unwrap();
+        }
+        refresh.join().unwrap().unwrap();
+        assert!(pending.iter().all(Result::is_ok));
+    });
+    assert_eq!(h.backend.get_sync_concurrency(), 1);
 }

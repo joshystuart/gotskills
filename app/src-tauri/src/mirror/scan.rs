@@ -1,8 +1,9 @@
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use super::discovery::skills::{discover_skills, DiscoverSkillsOptions};
-use super::git_exec::git;
+use super::git_exec::{git, git_bytes, GitError};
 
 /// A skill found in a mirror, with git provenance.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,59 +40,200 @@ fn to_posix_skill_path(mirror_path: &Path, skill_dir: &Path) -> String {
         .replace('\\', "/")
 }
 
+struct HistoryCommit {
+    date: String,
+    parents: Vec<String>,
+    changed_paths: HashMap<String, HashSet<String>>,
+}
+
+fn split_at_byte(bytes: &[u8], delimiter: u8) -> Option<(&[u8], &[u8])> {
+    let index = bytes.iter().position(|byte| *byte == delimiter)?;
+    Some((&bytes[..index], &bytes[index + 1..]))
+}
+
+fn path_provenance(log: &[u8], paths: &[String]) -> Option<HashMap<String, (String, String)>> {
+    let mut remaining = log;
+    let mut commits = HashMap::<String, HistoryCommit>::new();
+    let mut head = None;
+    while !remaining.is_empty() {
+        let (header, tail) = split_at_byte(remaining, b'\n')?;
+        let mut fields = std::str::from_utf8(header)
+            .ok()?
+            .strip_prefix("commit ")?
+            .split_whitespace();
+        let sha = fields.next()?.to_string();
+        let from = fields
+            .nth(1)
+            .map(|parent| parent.trim_end_matches(')').to_string());
+        head.get_or_insert_with(|| sha.clone());
+        let (size, tail) = split_at_byte(tail, b'\n')?;
+        let size: usize = std::str::from_utf8(size)
+            .ok()?
+            .strip_prefix("log size ")?
+            .parse()
+            .ok()?;
+        let body = String::from_utf8_lossy(tail.get(..size)?);
+        remaining = tail.get(size..)?;
+        let parents: Vec<String> = body
+            .lines()
+            .filter_map(|line| line.strip_prefix("parent ").map(str::to_string))
+            .collect();
+        let committer = body
+            .lines()
+            .find_map(|line| line.strip_prefix("committer "))?;
+        let mut date_fields = committer.rsplitn(3, ' ');
+        let zone = date_fields.next()?;
+        let stamp = date_fields.next()?;
+        let date = chrono::DateTime::parse_from_str(&format!("{stamp} {zone}"), "%s %z")
+            .ok()?
+            .format("%Y-%m-%dT%H:%M:%S%:z")
+            .to_string();
+        let parent = from
+            .or_else(|| parents.first().cloned())
+            .unwrap_or_default();
+        let commit = commits.entry(sha).or_insert_with(|| HistoryCommit {
+            date,
+            parents,
+            changed_paths: HashMap::new(),
+        });
+        let changed = commit.changed_paths.entry(parent).or_default();
+        if let Some(files) = remaining.strip_prefix(b"\n") {
+            remaining = files;
+            while !remaining.is_empty() {
+                let (file, tail) = split_at_byte(remaining, b'\0')?;
+                remaining = tail;
+                if file.is_empty() {
+                    break;
+                }
+                let file = String::from_utf8_lossy(file);
+                for path in paths {
+                    if path.is_empty()
+                        || file
+                            .strip_prefix(path)
+                            .is_some_and(|suffix| suffix.starts_with('/'))
+                    {
+                        changed.insert(path.clone());
+                    }
+                }
+            }
+        } else {
+            remaining = remaining.strip_prefix(b"\0").unwrap_or(remaining);
+        }
+    }
+    let mut result = HashMap::new();
+    for path in paths {
+        let mut sha = head.as_ref()?;
+        while let Some(commit) = commits.get(sha) {
+            let unchanged_parent = commit.parents.iter().find(|parent| {
+                !commit
+                    .changed_paths
+                    .get(*parent)
+                    .is_some_and(|changed| changed.contains(path))
+            });
+            if let Some(parent) = unchanged_parent {
+                sha = parent;
+            } else {
+                if commit
+                    .changed_paths
+                    .values()
+                    .any(|changed| changed.contains(path))
+                {
+                    result.insert(path.clone(), (sha.clone(), commit.date.clone()));
+                }
+                break;
+            }
+        }
+    }
+    Some(result)
+}
+
 /// Discover skills via the ported vercel-labs/skills rules, then attach git
 /// provenance per discovered path. Malformed or internal skills are skipped, as
-/// are skills whose git metadata cannot be read.
-pub fn scan_skills(mirror_path: &Path) -> Vec<ScannedSkill> {
+/// are skills with no git metadata. Errors when the batched git metadata cannot
+/// be read at all, so the caller keeps the last-good catalogue.
+pub fn scan_skills(mirror_path: &Path) -> Result<Vec<ScannedSkill>, GitError> {
     let discovered =
         discover_skills(mirror_path, None, DiscoverSkillsOptions::default()).unwrap_or_default();
+    if discovered.is_empty() {
+        return Ok(Vec::new());
+    }
+    let paths: Vec<_> = discovered
+        .iter()
+        .map(|skill| to_posix_skill_path(mirror_path, &skill.path))
+        .collect();
+    let (hashes, provenance) = {
+        let listing = git(mirror_path, &["ls-tree", "-r", "-d", "-z", "HEAD"])?;
+        let mut hashes: HashMap<String, String> = listing
+            .split('\0')
+            .filter_map(|entry| {
+                let (metadata, path) = entry.split_once('\t')?;
+                Some((
+                    path.to_string(),
+                    metadata.split_whitespace().nth(2)?.to_string(),
+                ))
+            })
+            .collect();
+        hashes.insert(
+            String::new(),
+            git(mirror_path, &["rev-parse", "HEAD^{tree}"])?,
+        );
+        let mut args = vec![
+            "log",
+            "--full-history",
+            "--sparse",
+            "-m",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            "--pretty=raw",
+            "--no-color",
+            "--root",
+            "--log-size",
+            "--",
+        ];
+        let pathspecs: Vec<_> = paths
+            .iter()
+            .map(|path| format!(":(literal){}", if path.is_empty() { "." } else { path }))
+            .collect();
+        args.extend(pathspecs.iter().map(String::as_str));
+        let log = git_bytes(mirror_path, &args)?;
+        let provenance = path_provenance(&log, &paths)
+            .ok_or_else(|| GitError::new("Invalid git history output"))?;
+        (hashes, provenance)
+    };
     let mut results = Vec::new();
-
-    for skill in discovered {
-        let skill_path = to_posix_skill_path(mirror_path, &skill.path);
-        let metadata = (|| {
-            Ok::<_, super::git_exec::GitError>((
-                git(
-                    mirror_path,
-                    &["log", "-1", "--format=%H", "--", &skill_path],
-                )?,
-                git(mirror_path, &["rev-parse", &format!("HEAD:{skill_path}")])?,
-                git(
-                    mirror_path,
-                    &["log", "-1", "--format=%cI", "--", &skill_path],
-                )?,
-            ))
-        })();
-        let (provenance_sha, content_hash, updated_at) = match metadata {
-            Ok(values) => values,
-            Err(error) => {
-                eprintln!(
-                    "[scan] skip {} ({skill_path}): git metadata failed: {error}",
-                    skill.name
-                );
-                continue;
-            }
+    for (skill, skill_path) in discovered.into_iter().zip(paths) {
+        let (Some(content_hash), Some((provenance_sha, updated_at))) =
+            (hashes.get(&skill_path), provenance.get(&skill_path))
+        else {
+            eprintln!(
+                "[scan] skip {} ({skill_path}): git metadata unavailable",
+                skill.name
+            );
+            continue;
         };
         results.push(ScannedSkill {
             id: skill.name.clone(),
             skill_path,
             name: skill.name,
             description: skill.description,
-            provenance_sha,
-            content_hash,
-            updated_at,
+            provenance_sha: provenance_sha.clone(),
+            content_hash: content_hash.clone(),
+            updated_at: updated_at.clone(),
             plugin_name: skill.plugin_name,
         });
     }
 
     results.sort_by(|a, b| locale_compare(&a.id, &b.id));
-    results
+    Ok(results)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mirror::test_support::{commit_all, git as run_git, make_repo, write_skill};
+    use crate::mirror::test_support::{
+        commit_all, git as run_git, last_commit_date, make_repo, write_skill,
+    };
     use std::fs;
 
     fn paths(skills: &[ScannedSkill]) -> Vec<&str> {
@@ -100,6 +242,293 @@ mod tests {
 
     fn ids(skills: &[ScannedSkill]) -> Vec<&str> {
         skills.iter().map(|s| s.id.as_str()).collect()
+    }
+
+    #[test]
+    fn scans_skills_when_git_always_colors_output() {
+        let repo = make_repo();
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Colored history"),
+        );
+        commit_all(repo.path(), "add skill");
+        let sha = run_git(repo.path(), &["rev-parse", "HEAD"]);
+        let date = last_commit_date(repo.path(), None);
+        run_git(repo.path(), &["config", "--local", "color.ui", "always"]);
+
+        let found = scan_skills(repo.path()).unwrap();
+        assert_eq!(ids(&found), vec!["alpha"]);
+        assert_eq!(found[0].provenance_sha, sha);
+        assert_eq!(found[0].updated_at, date);
+    }
+
+    #[test]
+    fn errors_instead_of_returning_no_skills_when_git_metadata_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        write_skill(
+            dir.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Not in git"),
+        );
+        assert!(scan_skills(dir.path()).is_err());
+    }
+
+    #[test]
+    fn scans_history_with_invalid_bytes_in_a_utf8_commit_message() {
+        use std::io::Write;
+        let repo = make_repo();
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: First"),
+        );
+        commit_all(repo.path(), "add skill");
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Second"),
+        );
+        run_git(repo.path(), &["add", "-A"]);
+        let tree = run_git(repo.path(), &["write-tree"]);
+        let parent = run_git(repo.path(), &["rev-parse", "HEAD"]);
+        let mut object = format!(
+            "tree {tree}\nparent {parent}\nauthor Test <test@example.com> 1700000000 +0000\ncommitter Test <test@example.com> 1700000000 +0000\nencoding UTF-8\n\ncaf"
+        )
+        .into_bytes();
+        object.extend_from_slice(b"\xe9\n");
+        let mut child = std::process::Command::new("git")
+            .args(["hash-object", "-t", "commit", "-w", "--stdin"])
+            .current_dir(repo.path())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(&object).unwrap();
+        let output = child.wait_with_output().unwrap();
+        let sha = String::from_utf8(output.stdout).unwrap().trim().to_string();
+        run_git(repo.path(), &["update-ref", "HEAD", &sha]);
+
+        let found = scan_skills(repo.path()).unwrap();
+        assert_eq!(ids(&found), vec!["alpha"]);
+        assert_eq!(found[0].provenance_sha, sha);
+        assert_eq!(found[0].updated_at, "2023-11-14T22:13:20+00:00");
+    }
+
+    #[test]
+    fn scans_root_commit_skills_when_git_hides_root_changes() {
+        let repo = make_repo();
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Root history"),
+        );
+        commit_all(repo.path(), "add skill");
+        let sha = run_git(repo.path(), &["rev-parse", "HEAD"]);
+        let date = last_commit_date(repo.path(), None);
+        run_git(repo.path(), &["config", "--local", "log.showRoot", "false"]);
+
+        let found = scan_skills(repo.path()).unwrap();
+        assert_eq!(ids(&found), vec!["alpha"]);
+        assert_eq!(found[0].provenance_sha, sha);
+        assert_eq!(found[0].updated_at, date);
+    }
+
+    #[test]
+    fn conflict_resolution_is_the_skills_last_commit() {
+        let repo = make_repo();
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Base"),
+        );
+        commit_all(repo.path(), "base");
+        run_git(repo.path(), &["checkout", "-b", "side"]);
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Side"),
+        );
+        commit_all(repo.path(), "side");
+        run_git(repo.path(), &["checkout", "main"]);
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Main"),
+        );
+        commit_all(repo.path(), "main");
+        let merge = std::process::Command::new("git")
+            .args(["merge", "side"])
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(!merge.status.success());
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Resolved"),
+        );
+        commit_all(repo.path(), "resolve");
+        let found = scan_skills(repo.path()).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].provenance_sha,
+            run_git(repo.path(), &["rev-parse", "HEAD"])
+        );
+        assert_eq!(
+            found[0].updated_at,
+            last_commit_date(repo.path(), Some("skills/alpha"))
+        );
+    }
+
+    #[test]
+    fn merge_provenance_matches_each_skill_directory_history() {
+        let repo = make_repo();
+        write_skill(
+            repo.path(),
+            "skills/alpha",
+            Some("name: alpha\ndescription: Skill"),
+        );
+        write_skill(
+            repo.path(),
+            "skills/beta",
+            Some("name: beta\ndescription: Skill"),
+        );
+        commit_all(repo.path(), "base");
+        run_git(repo.path(), &["checkout", "-b", "side"]);
+        fs::write(repo.path().join("skills/alpha/side"), "side").unwrap();
+        fs::write(repo.path().join("skills/beta/side"), "side").unwrap();
+        commit_all(repo.path(), "side");
+        run_git(repo.path(), &["checkout", "main"]);
+        fs::write(repo.path().join("skills/alpha/main"), "main").unwrap();
+        commit_all(repo.path(), "main");
+        run_git(repo.path(), &["merge", "side", "-m", "merge"]);
+        let found = scan_skills(repo.path()).unwrap();
+        assert_eq!(found.len(), 2);
+        for skill in found {
+            assert_eq!(
+                skill.provenance_sha,
+                run_git(
+                    repo.path(),
+                    &["log", "-1", "--format=%H", "--", &skill.skill_path]
+                )
+            );
+            assert_eq!(
+                skill.updated_at,
+                last_commit_date(repo.path(), Some(&skill.skill_path))
+            );
+        }
+    }
+
+    #[test]
+    fn skips_an_untracked_skill_without_losing_committed_skills() {
+        let repo = make_repo();
+        fs::write(repo.path().join("README.md"), "registry").unwrap();
+        commit_all(repo.path(), "before skills");
+        write_skill(
+            repo.path(),
+            "skills/tracked",
+            Some("name: tracked\ndescription: Saved"),
+        );
+        commit_all(repo.path(), "tracked");
+        write_skill(
+            repo.path(),
+            "skills/untracked",
+            Some("name: untracked\ndescription: No metadata"),
+        );
+        assert_eq!(ids(&scan_skills(repo.path()).unwrap()), vec!["tracked"]);
+    }
+
+    #[test]
+    fn provenance_matches_path_history_after_a_move_and_move_back() {
+        let repo = make_repo();
+        write_skill(
+            repo.path(),
+            "skills/first/alpha",
+            Some("name: alpha\ndescription: Moved"),
+        );
+        write_skill(
+            repo.path(),
+            "skills/beta",
+            Some("name: beta\ndescription: Unchanged"),
+        );
+        commit_all(repo.path(), "seed");
+        fs::create_dir_all(repo.path().join("skills/second")).unwrap();
+        run_git(
+            repo.path(),
+            &["mv", "skills/first/alpha", "skills/second/alpha"],
+        );
+        commit_all(repo.path(), "move");
+        fs::create_dir_all(repo.path().join("skills/first")).unwrap();
+        run_git(
+            repo.path(),
+            &["mv", "skills/second/alpha", "skills/first/alpha"],
+        );
+        commit_all(repo.path(), "move back");
+        for skill in scan_skills(repo.path()).unwrap() {
+            assert_eq!(
+                skill.provenance_sha,
+                run_git(
+                    repo.path(),
+                    &["log", "-1", "--format=%H", "--", &skill.skill_path]
+                )
+            );
+            assert_eq!(
+                skill.updated_at,
+                last_commit_date(repo.path(), Some(&skill.skill_path))
+            );
+            assert_eq!(
+                skill.content_hash,
+                run_git(
+                    repo.path(),
+                    &["rev-parse", &format!("HEAD:{}", skill.skill_path)]
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn records_root_skill_tree_and_provenance() {
+        let repo = make_repo();
+        write_skill(repo.path(), "", Some("name: root\ndescription: Root skill"));
+        commit_all(repo.path(), "root");
+        let found = scan_skills(repo.path()).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].skill_path, "");
+        assert_eq!(
+            found[0].content_hash,
+            run_git(repo.path(), &["rev-parse", "HEAD:"])
+        );
+        assert_eq!(
+            found[0].provenance_sha,
+            run_git(repo.path(), &["rev-parse", "HEAD"])
+        );
+    }
+
+    #[test]
+    fn git_process_count_does_not_grow_with_skills_or_history() {
+        fn count(skills: usize, commits: usize) -> usize {
+            let repo = make_repo();
+            for index in 0..skills {
+                write_skill(
+                    repo.path(),
+                    &format!("skills/skill-{index}"),
+                    Some(&format!("name: skill-{index}\ndescription: Skill")),
+                );
+            }
+            commit_all(repo.path(), "skills");
+            for index in 1..commits {
+                fs::write(repo.path().join("skills/skill-0/data"), index.to_string()).unwrap();
+                commit_all(repo.path(), "update");
+            }
+            let (found, calls) = crate::mirror::git_exec::count_git_invocations(|| {
+                scan_skills(repo.path()).unwrap()
+            });
+            assert_eq!(found.len(), skills);
+            assert!(calls <= 3, "scan used {calls} git processes");
+            calls
+        }
+        assert_eq!(count(2, 1), count(20, 50));
     }
 
     #[test]
@@ -117,7 +546,7 @@ mod tests {
         );
         commit_all(repo.path(), "add skills");
 
-        let found = scan_skills(repo.path());
+        let found = scan_skills(repo.path()).unwrap();
         assert_eq!(ids(&found), vec!["alpha", "beta"]);
         let alpha = &found[0];
         assert_eq!(alpha.name, "alpha");
@@ -135,7 +564,7 @@ mod tests {
         );
         commit_all(repo.path(), "nested skill");
 
-        let found = scan_skills(repo.path());
+        let found = scan_skills(repo.path()).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, "code-review");
         assert_eq!(found[0].skill_path, "skills/engineering/code-review");
@@ -158,7 +587,7 @@ mod tests {
         commit_all(repo.path(), "deep nesting");
 
         assert_eq!(
-            paths(&scan_skills(repo.path())),
+            paths(&scan_skills(repo.path()).unwrap()),
             vec!["skills/eng/backend/api", "skills/top"]
         );
     }
@@ -184,7 +613,7 @@ mod tests {
         commit_all(repo.path(), "agent dirs");
 
         assert_eq!(
-            paths(&scan_skills(repo.path())),
+            paths(&scan_skills(repo.path()).unwrap()),
             vec![
                 ".factory/skills/droid",
                 ".posit/assistant/skills/helper",
@@ -206,7 +635,7 @@ mod tests {
         fs::create_dir_all(repo.path().join("skills/empty")).unwrap();
         commit_all(repo.path(), "mixed");
 
-        assert_eq!(ids(&scan_skills(repo.path())), vec!["good"]);
+        assert_eq!(ids(&scan_skills(repo.path()).unwrap()), vec!["good"]);
     }
 
     #[test]
@@ -224,7 +653,7 @@ mod tests {
         );
         commit_all(repo.path(), "internal mix");
 
-        assert_eq!(ids(&scan_skills(repo.path())), vec!["public"]);
+        assert_eq!(ids(&scan_skills(repo.path()).unwrap()), vec!["public"]);
     }
 
     #[test]
@@ -242,7 +671,7 @@ mod tests {
         );
         commit_all(repo.path(), "dupes");
 
-        let found = scan_skills(repo.path());
+        let found = scan_skills(repo.path()).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].description, "First path");
     }
@@ -263,7 +692,7 @@ mod tests {
         );
         commit_all(repo.path(), "plugin json");
 
-        let found = scan_skills(repo.path());
+        let found = scan_skills(repo.path()).unwrap();
         assert_eq!(ids(&found), vec!["solo-review"]);
         assert_eq!(found[0].plugin_name.as_deref(), Some("solo-plugin"));
     }
@@ -278,7 +707,7 @@ mod tests {
         );
         commit_all(repo.path(), "mismatch");
 
-        let found = scan_skills(repo.path());
+        let found = scan_skills(repo.path()).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, "install-key");
         assert_eq!(found[0].skill_path, "skills/my-folder");
@@ -300,7 +729,7 @@ mod tests {
         );
         commit_all(repo.path(), "plugin manifest");
 
-        let found = scan_skills(repo.path());
+        let found = scan_skills(repo.path()).unwrap();
         assert_eq!(ids(&found), vec!["plugin-review"]);
         assert_eq!(found[0].plugin_name.as_deref(), Some("demo-plugin"));
     }
@@ -328,7 +757,7 @@ mod tests {
         commit_all(repo.path(), "update alpha");
         let second = run_git(repo.path(), &["rev-parse", "HEAD"]);
 
-        let found = scan_skills(repo.path());
+        let found = scan_skills(repo.path()).unwrap();
         let alpha = found.iter().find(|s| s.id == "alpha").unwrap();
         let beta = found.iter().find(|s| s.id == "beta").unwrap();
         assert_eq!(alpha.provenance_sha, second);
@@ -357,7 +786,7 @@ mod tests {
         commit_all(repo.path(), "nested");
         let sha = run_git(repo.path(), &["rev-parse", "HEAD"]);
 
-        let found = scan_skills(repo.path());
+        let found = scan_skills(repo.path()).unwrap();
         assert_eq!(found[0].provenance_sha, sha);
         assert_eq!(
             found[0].content_hash,
@@ -383,7 +812,7 @@ mod tests {
         );
         commit_all(repo.path(), "with example");
 
-        assert_eq!(ids(&scan_skills(repo.path())), vec!["kept"]);
+        assert_eq!(ids(&scan_skills(repo.path()).unwrap()), vec!["kept"]);
     }
 
     #[test]
