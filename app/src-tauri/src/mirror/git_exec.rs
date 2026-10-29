@@ -49,7 +49,21 @@ impl From<GitError> for AppError {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static INVOCATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub fn count_git_invocations<T>(operation: impl FnOnce() -> T) -> (T, usize) {
+    INVOCATIONS.with(|count| count.set(0));
+    let result = operation();
+    (result, INVOCATIONS.with(|count| count.get()))
+}
+
 fn run(cwd: Option<&Path>, args: &[&str]) -> Result<String, GitError> {
+    #[cfg(test)]
+    INVOCATIONS.with(|count| count.set(count.get() + 1));
     let mut command = Command::new("git");
     command.args(NON_INTERACTIVE_ARGS).args(args);
     for (key, value) in NON_INTERACTIVE_ENV {
@@ -69,15 +83,20 @@ fn run(cwd: Option<&Path>, args: &[&str]) -> Result<String, GitError> {
             stderr.trim_end()
         )));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Run a git subcommand in `cwd`; errors on non-zero exit.
 pub fn git(cwd: &Path, args: &[&str]) -> Result<String, GitError> {
+    run(Some(cwd), args).map(|output| output.trim().to_string())
+}
+
+/// Run git while preserving output delimiters and trailing whitespace.
+pub(crate) fn git_output(cwd: &Path, args: &[&str]) -> Result<String, GitError> {
     run(Some(cwd), args)
 }
 
 /// Run git without a working tree (e.g. clone into a new path).
 pub fn git_global(args: &[&str]) -> Result<String, GitError> {
-    run(None, args)
+    run(None, args).map(|output| output.trim().to_string())
 }

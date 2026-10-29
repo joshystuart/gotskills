@@ -45,10 +45,46 @@ mod tests {
     }
 
     #[test]
+    fn upgrading_schema_10_drops_history_and_preserves_the_catalogue() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cache.sqlite");
+        let previous = legacy(&path, 10);
+        previous.execute_batch(
+            "INSERT INTO registry (id, url, branch, canonical_key, created_at, updated_at)
+             VALUES ('saved', 'https://example.test/saved', 'main', 'saved', '2026-01-01', '2026-01-01');
+             INSERT INTO skill (registry_id, folder_name, name, description)
+             VALUES ('saved', 'alpha', 'Alpha', 'Retained skill');
+             INSERT INTO version (registry_id, folder_name, commit_sha, content_hash, committed_at)
+             VALUES ('saved', 'alpha', 'sha', 'hash', '2026-01-01');"
+        ).unwrap();
+        drop(previous);
+        let db = open_database(&path).unwrap();
+        assert_eq!(
+            count(
+                &db,
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='version'"
+            ),
+            0
+        );
+        assert_eq!(
+            count(&db, "SELECT count(*) FROM registry WHERE id='saved'"),
+            1
+        );
+        let skill: (String, String) = db
+            .query_row(
+                "SELECT name, description FROM skill WHERE registry_id='saved'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(skill, ("Alpha".into(), "Retained skill".into()));
+    }
+
+    #[test]
     fn fresh_database_has_the_final_schema_and_pragmas() {
         let dir = tempfile::tempdir().unwrap();
         let db = open_database(&dir.path().join("cache.sqlite")).unwrap();
-        assert_eq!(user_version(&db).unwrap(), 10);
+        assert_eq!(user_version(&db).unwrap(), 11);
         assert_eq!(count(&db, "PRAGMA foreign_keys"), 1);
         let mode: String = db
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
@@ -58,7 +94,6 @@ mod tests {
             "registry",
             "registry_sync_marker",
             "skill",
-            "version",
             "install_record",
             "telemetry_event",
             "app_setting",
@@ -113,7 +148,7 @@ mod tests {
             .unwrap();
         drop(previous);
         let db = open_database(&path).unwrap();
-        assert_eq!(user_version(&db).unwrap(), 10);
+        assert_eq!(user_version(&db).unwrap(), 11);
         let (branch, colour, name): (String, Option<String>, Option<String>) = db
             .query_row(
                 "SELECT branch, colour, name FROM registry WHERE id = 'saved'",
@@ -219,7 +254,7 @@ mod tests {
             .unwrap();
         drop(first);
         let second = open_database(&path).unwrap();
-        assert_eq!(user_version(&second).unwrap(), 10);
+        assert_eq!(user_version(&second).unwrap(), 11);
         assert_eq!(
             count(&second, "SELECT count(*) FROM registry WHERE id = 'r1'"),
             1
@@ -244,7 +279,7 @@ mod tests {
         .unwrap();
         drop(v3);
         let db = open_database(&path).unwrap();
-        assert_eq!(user_version(&db).unwrap(), 10);
+        assert_eq!(user_version(&db).unwrap(), 11);
         let installation: String = db
             .query_row(
                 "SELECT installation_id FROM telemetry_event WHERE event_id = 'event-a'",
@@ -302,6 +337,6 @@ mod tests {
     #[test]
     fn migrations_are_numbered_contiguously() {
         let versions: Vec<i64> = MIGRATIONS.iter().map(|(v, _)| *v).collect();
-        assert_eq!(versions, (1..=10).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=11).collect::<Vec<_>>());
     }
 }

@@ -7,7 +7,7 @@ use crate::db::{transaction, SyncMarkerStatus};
 use crate::registries::upsert_marker_success;
 
 use super::git::{ensure_mirror, MirrorConfig};
-use super::git_exec::{git, GitError};
+use super::git_exec::GitError;
 use super::scan::{scan_skills, ScannedSkill};
 
 /// Inputs for syncing one registry.
@@ -29,57 +29,19 @@ pub struct SyncWriteResult {
     pub status: SyncMarkerStatus,
 }
 
-struct HistoryEntry {
-    commit_sha: String,
-    content_hash: String,
-    committed_at: String,
-}
-
 fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
-/// All commits that touched `skill_path`, oldest to newest, with the tree hash
-/// at each. Rename and move commits appear in the path history without the path
-/// existing at that revision, so they are skipped.
-fn skill_history(
-    mirror_path: &std::path::Path,
-    skill_path: &str,
-) -> Result<Vec<HistoryEntry>, GitError> {
-    let log = git(
-        mirror_path,
-        &["log", "--reverse", "--format=%H%x09%cI", "--", skill_path],
-    )?;
-    let mut entries = Vec::new();
-    for line in log.lines().filter(|line| !line.trim().is_empty()) {
-        let mut parts = line.split('\t');
-        let (Some(commit_sha), Some(committed_at)) = (parts.next(), parts.next()) else {
-            continue;
-        };
-        let Ok(content_hash) = git(
-            mirror_path,
-            &["rev-parse", &format!("{commit_sha}:{skill_path}")],
-        ) else {
-            continue;
-        };
-        entries.push(HistoryEntry {
-            commit_sha: commit_sha.to_string(),
-            content_hash,
-            committed_at: committed_at.to_string(),
-        });
-    }
-    Ok(entries)
-}
-
 /// Persist a successful scan for one registry: upsert skills and head fields,
-/// soft-delete absences within this registry only, append version history and
+/// soft-delete absences within this registry only and
 /// update this registry's success marker. Other registries are untouched.
 pub fn write_scan_to_db(
     conn: &Connection,
     registry_id: &str,
     revision: &str,
     skills: &[ScannedSkill],
-    mirror_path: &std::path::Path,
+    _mirror_path: &std::path::Path,
 ) -> Result<SyncWriteResult, GitError> {
     let at = now();
     let status = if skills.is_empty() {
@@ -87,11 +49,6 @@ pub fn write_scan_to_db(
     } else {
         SyncMarkerStatus::Ok
     };
-
-    let mut histories = Vec::with_capacity(skills.len());
-    for skill in skills {
-        histories.push(skill_history(mirror_path, &skill.skill_path)?);
-    }
 
     transaction(conn, || -> Result<(), rusqlite::Error> {
         let mut upsert_skill = conn.prepare(
@@ -115,15 +72,7 @@ pub fn write_scan_to_db(
                last_seen_revision = excluded.last_seen_revision,
                last_seen_at = excluded.last_seen_at",
         )?;
-        let mut upsert_version = conn.prepare(
-            "INSERT INTO version (registry_id, folder_name, commit_sha, content_hash, committed_at)
-             VALUES (:registry_id, :folder_name, :commit_sha, :content_hash, :committed_at)
-             ON CONFLICT(registry_id, folder_name, commit_sha) DO UPDATE SET
-               content_hash = excluded.content_hash,
-               committed_at = excluded.committed_at",
-        )?;
-
-        for (skill, history) in skills.iter().zip(&histories) {
+        for skill in skills {
             upsert_skill.execute(named_params! {
                 ":registry_id": registry_id,
                 ":folder_name": skill.id,
@@ -136,15 +85,6 @@ pub fn write_scan_to_db(
                 ":last_seen_revision": revision,
                 ":last_seen_at": at,
             })?;
-            for entry in history {
-                upsert_version.execute(named_params! {
-                    ":registry_id": registry_id,
-                    ":folder_name": skill.id,
-                    ":commit_sha": entry.commit_sha,
-                    ":content_hash": entry.content_hash,
-                    ":committed_at": entry.committed_at,
-                })?;
-            }
         }
 
         let present: HashSet<&str> = skills.iter().map(|skill| skill.id.as_str()).collect();
@@ -465,16 +405,6 @@ mod tests {
             marker.last_sync_revision.as_deref(),
             Some(result.revision.as_str())
         );
-
-        let versions: i64 = fx
-            .conn
-            .query_row(
-                "SELECT COUNT(DISTINCT folder_name) FROM version",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(versions, 2);
     }
 
     #[test]
