@@ -399,6 +399,18 @@ export function App({ api }: AppProps): JSX.Element {
     }
   }
 
+  async function chooseRegistryFolder(
+    setUrl: (url: string) => void,
+    setError: (error: string | null) => void
+  ): Promise<void> {
+    try {
+      const folder = await api.chooseRegistryFolder()
+      if (folder !== null) setUrl(folder)
+    } catch (error) {
+      setError(errorMessage(error))
+    }
+  }
+
   function attemptEdit(event: FormEvent, registry: RegistryRecord): void {
     event.preventDefault()
     const branchChanged = editBranch.trim() !== registry.branch
@@ -805,6 +817,7 @@ export function App({ api }: AppProps): JSX.Element {
               name: editName,
               branchWarn,
               onUrlChange: setEditUrl,
+              onChooseFolder: () => void chooseRegistryFolder(setEditUrl, setRegistryError),
               onBranchChange: setEditBranch,
               onNameChange: setEditName,
               onStart: startEdit,
@@ -818,6 +831,7 @@ export function App({ api }: AppProps): JSX.Element {
               busy: addBusy,
               error: addError,
               onUrlChange: setAddUrl,
+              onChooseFolder: () => void chooseRegistryFolder(setAddUrl, setAddError),
               onBranchChange: setAddBranch,
               onSubmit: onAddRegistry,
             }}

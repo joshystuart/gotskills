@@ -11,6 +11,7 @@ use std::time::Duration;
 use tauri::menu::{CheckMenuItemBuilder, Menu, MenuItemBuilder, PredefinedMenuItem};
 use tauri::{AppHandle, LogicalPosition, Manager, State, Window};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::backend::app_update::AppUpdate;
@@ -362,4 +363,18 @@ pub async fn show_registry_menu(
         }
         None => Ok(None),
     }
+}
+
+#[tauri::command]
+pub async fn choose_registry_folder(app: AppHandle) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .blocking_pick_folder()
+            .and_then(|folder| folder.into_path().ok())
+            .map(|path| path.to_string_lossy().into_owned())
+    })
+    .await
+    .ok()
+    .flatten()
 }

@@ -231,6 +231,7 @@ pub fn run() {
         .on_window_event(on_window_event)
         .setup(setup)
         .invoke_handler(tauri::generate_handler![
+            commands::choose_registry_folder,
             commands::get_app_update_state,
             commands::check_app_update,
             commands::get_auto_download_app_updates,

@@ -2197,6 +2197,72 @@ describe('Settings registry list', () => {
     expect(within(add).getByRole('button', { name: 'Add registry' })).toBeEnabled()
   })
 
+  it('hides branch controls for folder paths and keeps them for Git URLs', async () => {
+    render(<App api={fakeApi(syncStatus())} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    const add = screen.getByRole('region', { name: 'Add registry' })
+    for (const value of ['/Users/me/skills', '~/skills']) {
+      fireEvent.change(within(add).getByLabelText('New registry URL'), { target: { value } })
+      expect(within(add).queryByLabelText('New registry branch')).not.toBeInTheDocument()
+      expect(
+        within(add).queryByText('Branch is detected automatically when possible.')
+      ).not.toBeInTheDocument()
+    }
+    fireEvent.change(within(add).getByLabelText('New registry URL'), {
+      target: { value: 'file:///skills' },
+    })
+    expect(within(add).getByLabelText('New registry branch')).toBeInTheDocument()
+  })
+
+  it('fills either registry URL from the folder picker and preserves it on cancellation', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      chooseRegistryFolder: vi.fn().mockResolvedValue('/Users/me/skills'),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    const add = screen.getByRole('region', { name: 'Add registry' })
+    await act(async () => {
+      within(add).getByRole('button', { name: 'Choose folder…' }).click()
+    })
+    expect(within(add).getByLabelText('New registry URL')).toHaveValue('/Users/me/skills')
+    vi.mocked(api.chooseRegistryFolder).mockResolvedValue(null)
+    await act(async () => {
+      within(add).getByRole('button', { name: 'Choose folder…' }).click()
+    })
+    expect(within(add).getByLabelText('New registry URL')).toHaveValue('/Users/me/skills')
+    fireEvent.click(screen.getByRole('button', { name: 'Edit anthropics/skills' }))
+    const edit = screen.getByRole('form', { name: 'Edit anthropics/skills' })
+    vi.mocked(api.chooseRegistryFolder).mockResolvedValue('~/other-skills')
+    await act(async () => {
+      within(edit).getByRole('button', { name: 'Choose folder…' }).click()
+    })
+    expect(within(edit).getByLabelText('Registry URL')).toHaveValue('~/other-skills')
+    expect(within(edit).queryByLabelText('Branch')).not.toBeInTheDocument()
+  })
+
+  it('opens an existing local registry with its path and no Branch field', async () => {
+    const local = registryRecord({
+      source: 'local',
+      url: '/Users/me/skills',
+      branch: '',
+      automaticName: '~/skills',
+      githubOwner: null,
+      githubRepo: null,
+    })
+    render(
+      <App
+        api={fakeApi(syncStatus(), [], { listRegistries: vi.fn().mockResolvedValue([local]) })}
+      />
+    )
+    await screen.findByText('Synced')
+    await openSettings()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit ~/skills' }))
+    expect(screen.getByLabelText('Registry URL')).toHaveValue('/Users/me/skills')
+    expect(screen.queryByLabelText('Branch')).not.toBeInTheDocument()
+  })
+
   it('adds a registry with an optional branch', async () => {
     const added = registryRecord({ id: 'new', url: 'https://github.com/example/team-skills' })
     const api = fakeApi(syncStatus(), [], {

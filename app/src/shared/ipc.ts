@@ -387,6 +387,7 @@ export interface RegistryMenuRequest {
 }
 
 export interface RegistryMenuApi {
+  chooseRegistryFolder(): Promise<string | null>
   /** Show the native registry menu; resolves to the renderer action chosen, or null. */
   showRegistryMenu(req: RegistryMenuRequest): Promise<RegistryMenuAction | null>
 }
@@ -418,6 +419,7 @@ export interface RendererApi
  * `installation-collision` carries occupant, folderName and target.
  */
 export const IpcRequest = {
+  chooseRegistryFolder: 'registry:chooseFolder',
   getAppUpdateState: 'appUpdate:getState',
   checkAppUpdate: 'appUpdate:check',
   getAutoDownloadAppUpdates: 'appUpdate:getAutoDownload',
