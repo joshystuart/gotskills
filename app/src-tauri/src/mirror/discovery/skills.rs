@@ -14,7 +14,7 @@ use super::paths::{njoin, normalize, resolve};
 use super::plugin_manifest::{get_plugin_groupings, get_plugin_skill_paths};
 use super::sanitize::{sanitize_metadata, strip_terminal_escapes};
 
-const SKIP_DIRS: [&str; 5] = ["node_modules", ".git", "dist", "build", "__pycache__"];
+pub(crate) const SKIP_DIRS: [&str; 5] = ["node_modules", ".git", "dist", "build", "__pycache__"];
 
 const AGENT_PROJECT_SKILL_DIRS: [&str; 30] = [
     ".agents/skills",

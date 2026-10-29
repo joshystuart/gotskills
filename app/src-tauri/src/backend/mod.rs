@@ -8,6 +8,7 @@
 
 pub mod app_update;
 pub mod appearance;
+mod local_watch;
 pub mod registry_menu;
 
 #[cfg(test)]
@@ -161,6 +162,20 @@ fn is_hex_colour(value: &str) -> bool {
 
 /// The application backend: state plus every operation the commands expose.
 pub struct Backend {
+    inner: Arc<BackendState>,
+}
+
+impl std::ops::Deref for Backend {
+    type Target = BackendState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+/// Shared backend state; filesystem watchers retain only weak references.
+pub struct BackendState {
+    watches: Mutex<BTreeMap<String, local_watch::LocalWatch>>,
     conn: Mutex<Connection>,
     paths: DataPaths,
     environment: Environment,
@@ -219,20 +234,24 @@ impl Backend {
         telemetry.emit(&conn, EmitInput::new(TelemetryEventType::SessionStarted))?;
 
         let backend = Backend {
-            conn: Mutex::new(conn),
-            paths,
-            environment,
-            telemetry,
-            mirror_mutexes: Mutex::new(BTreeMap::new()),
-            events,
-            runtime: Mutex::new(RuntimeState::default()),
-            sync_done: Condvar::new(),
-            sync_impl: sync_override.unwrap_or_else(|| Arc::new(sync_registry)),
+            inner: Arc::new(BackendState {
+                watches: Mutex::new(BTreeMap::new()),
+                conn: Mutex::new(conn),
+                paths,
+                environment,
+                telemetry,
+                mirror_mutexes: Mutex::new(BTreeMap::new()),
+                events,
+                runtime: Mutex::new(RuntimeState::default()),
+                sync_done: Condvar::new(),
+                sync_impl: sync_override.unwrap_or_else(|| Arc::new(sync_registry)),
+            }),
         };
         if list_registries(&backend.db(), true)?.is_empty() {
             backend.seed_default_registry();
         }
         backend.finish_interrupted_removals()?;
+        backend.refresh_local_watches();
         Ok(backend)
     }
 
@@ -448,6 +467,14 @@ impl Backend {
     /// Sync one registry; concurrent requests for the same id wait for the
     /// running sync and share its result.
     fn do_sync(&self, registry: &StoredRegistry) -> AppResult<RegistrySyncStatus> {
+        self.do_sync_pending(registry, false)
+    }
+
+    fn do_sync_pending(
+        &self,
+        registry: &StoredRegistry,
+        follow_up: bool,
+    ) -> AppResult<RegistrySyncStatus> {
         {
             let mut runtime = self.runtime();
             if runtime.in_flight.contains(&registry.id) {
@@ -457,8 +484,10 @@ impl Backend {
                         .wait(runtime)
                         .unwrap_or_else(|p| p.into_inner());
                 }
-                drop(runtime);
-                return self.registry_status(&self.db(), &registry.id);
+                if !follow_up {
+                    drop(runtime);
+                    return self.registry_status(&self.db(), &registry.id);
+                }
             }
             runtime.in_flight.insert(registry.id.clone());
         }
@@ -466,6 +495,18 @@ impl Backend {
         let _guard = InFlightGuard {
             backend: self,
             registry_id: registry.id.clone(),
+        };
+        let refreshed;
+        let registry = if follow_up {
+            refreshed = get_registry(&self.db(), &registry.id)?.filter(|registry| {
+                registry.source == "local" && registry.enabled && registry.removed_at.is_none()
+            });
+            let Some(registry) = refreshed.as_ref() else {
+                return self.registry_status(&self.db(), &registry.id);
+            };
+            registry
+        } else {
+            registry
         };
         let (status, scanned) = self.sync_exclusive(registry)?;
         if status.phase == SyncPhase::Synced && scanned {
@@ -1015,6 +1056,7 @@ impl Backend {
         if stored.enabled {
             self.do_sync(&stored)?;
         }
+        self.refresh_local_watches();
         self.events.catalogue_updated();
         self.emit_status();
         self.registry_record(&stored.id)
@@ -1105,6 +1147,7 @@ impl Backend {
         };
         let url_or_branch_changed = fields.url.is_some() || fields.branch.is_some();
         let updated = update_registry(&self.db(), &request.id, fields)?;
+        self.refresh_local_watches();
         let enabled_from_disabled = request.enabled == Some(true) && !current.enabled;
         let auto_update_enabled = request.auto_update == Some(true) && !current.auto_update;
         if updated.enabled
@@ -1122,6 +1165,7 @@ impl Backend {
             return Ok(());
         }
         soft_remove_registry(&self.db(), id)?;
+        self.refresh_local_watches();
         self.cleanup_orphan_if_exhausted(id)?;
         self.events.catalogue_updated();
         self.emit_status();
