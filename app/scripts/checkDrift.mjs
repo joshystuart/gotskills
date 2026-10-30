@@ -1,6 +1,11 @@
 import { parse } from 'yaml'
 
-const exemptCommands = ['npm ci', 'npm run build', 'scripts/check-app-size.sh']
+const exemptCommands = [
+  'npm ci',
+  'npm run build',
+  'scripts/check-app-size.sh',
+  'test "$PRETTIER_RESULT" = success\ntest "$TEST_RESULT" = success\ntest "$BUILD_RESULT" = success',
+]
 
 function runCommands(workflowText) {
   const { jobs } = parse(workflowText)
