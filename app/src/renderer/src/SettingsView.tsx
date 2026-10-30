@@ -82,7 +82,9 @@ interface RegistryColourPickerProps {
   onChangeColour: (registry: RegistryRecord, colour: string) => Promise<void>
 }
 
-/** The picker's native change event fires once on close; React's onChange fires on every drag. */
+const COLOUR_SAVE_DELAY_MS = 300
+
+/** WebKit fires the native change event throughout a drag on the wheel, so the save waits for it to settle. */
 function RegistryColourPicker({
   registry,
   name,
@@ -92,16 +94,36 @@ function RegistryColourPicker({
   const savedColour = registryDotColour(registry)
   const [preview, setPreview] = useState<string | null>(null)
   const colour = preview ?? savedColour
+  const latestPick = useRef<string | null>(null)
+  const pendingSave = useRef<{ timer: ReturnType<typeof setTimeout>; run: () => void } | null>(null)
 
   useEffect(() => {
     const input = inputRef.current
     if (!input) return
-    const commit = (): void => {
-      void onChangeColour(registry, input.value).finally(() => setPreview(null))
+    const schedule = (): void => {
+      const pick = input.value
+      latestPick.current = pick
+      if (pendingSave.current) clearTimeout(pendingSave.current.timer)
+      const run = (): void => {
+        pendingSave.current = null
+        void onChangeColour(registry, pick).finally(() => {
+          if (latestPick.current === pick) setPreview(null)
+        })
+      }
+      pendingSave.current = { timer: setTimeout(run, COLOUR_SAVE_DELAY_MS), run }
     }
-    input.addEventListener('change', commit)
-    return () => input.removeEventListener('change', commit)
+    input.addEventListener('change', schedule)
+    return () => input.removeEventListener('change', schedule)
   }, [registry, onChangeColour])
+
+  useEffect(
+    () => () => {
+      if (!pendingSave.current) return
+      clearTimeout(pendingSave.current.timer)
+      pendingSave.current.run()
+    },
+    []
+  )
 
   return (
     <>

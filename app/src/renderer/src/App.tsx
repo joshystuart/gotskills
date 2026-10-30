@@ -454,15 +454,12 @@ export function App({ api }: AppProps): JSX.Element {
   }
 
   async function onChangeColour(registry: RegistryRecord, colour: string): Promise<void> {
-    setRegistryBusy(true)
     setRegistryError(null)
     try {
       await api.updateRegistry({ id: registry.id, colour })
       await refreshAfterRegistryChange()
     } catch (err) {
       setRegistryError(errorMessage(err))
-    } finally {
-      setRegistryBusy(false)
     }
   }
 
