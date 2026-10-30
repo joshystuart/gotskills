@@ -3,6 +3,14 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The closed set of Registry sources, shared by storage, sync and IPC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RegistrySource {
+    Git,
+    Local,
+}
+
 /// Longest Registry Name allowed, after trimming.
 pub const MAX_REGISTRY_NAME_LENGTH: usize = 40;
 
@@ -50,11 +58,31 @@ pub enum SyncFailureReason {
     Offline,
     Empty,
     AccessRequired,
+    FolderNotFound,
+    FolderUnreadable,
+    FolderChanged,
+    SnapshotFailed,
+}
+
+impl SyncFailureReason {
+    /// Whether this reason is about a Local Registry folder, so its status
+    /// names the folder path.
+    pub fn is_local(self) -> bool {
+        matches!(
+            self,
+            SyncFailureReason::FolderNotFound
+                | SyncFailureReason::FolderUnreadable
+                | SyncFailureReason::FolderChanged
+                | SyncFailureReason::SnapshotFailed
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrySyncStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_path: Option<String>,
     pub registry_id: String,
     pub phase: SyncPhase,
     pub last_synced_at: Option<String>,
@@ -165,6 +193,8 @@ pub struct CatalogueSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryRecord {
+    pub source: RegistrySource,
+    pub automatic_name: String,
     pub id: String,
     pub url: String,
     pub branch: String,
@@ -637,6 +667,7 @@ mod tests {
     #[test]
     fn optional_status_fields_are_omitted_not_null() {
         let status = RegistrySyncStatus {
+            folder_path: None,
             registry_id: "r".into(),
             phase: SyncPhase::Synced,
             last_synced_at: None,

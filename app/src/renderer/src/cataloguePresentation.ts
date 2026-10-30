@@ -2,8 +2,10 @@ import type {
   InstallTargetId,
   InstallTargetStatus,
   ReconcileState,
+  RegistryRecord,
   RegistrySyncStatus,
   SkillSummary,
+  SyncFailureReason,
   SyncStatus,
 } from '../../shared/ipc'
 
@@ -55,7 +57,27 @@ export function syncLabel(status: SyncStatus): { glyph: string; text: string } {
   }
 }
 
+const LOCAL_FAILURE_TITLES: Partial<Record<SyncFailureReason, string>> = {
+  'folder-not-found': 'Folder not found',
+  'folder-unreadable': "Folder can't be read",
+  'folder-changed': 'Folder changed during sync',
+  'snapshot-failed': "Couldn't save a snapshot of the folder",
+}
+
+function localFailureLabel(status: RegistrySyncStatus): string | null {
+  const title = status.reason && LOCAL_FAILURE_TITLES[status.reason]
+  if (!title) return null
+  return status.folderPath ? `${title}: ${status.folderPath}` : title
+}
+
 export function bannerMessage(status: SyncStatus): string | null {
+  const localFailures = status.registries
+    .filter((registry) => registry.phase === 'failed')
+    .map(localFailureLabel)
+    .filter((label) => label !== null)
+  if ((status.phase === 'partial' || status.phase === 'failed') && localFailures.length > 0) {
+    return `${localFailures.join('; ')} — showing the latest available skills. Open Settings to review each registry.`
+  }
   if (status.phase === 'partial') {
     return 'Some registries could not be synced — showing the latest available skills. Open Settings to review each registry.'
   }
@@ -79,11 +101,12 @@ export function registryStatusLabel(status: RegistrySyncStatus): { glyph: string
       return { glyph: '↻', text: 'Syncing…' }
     case 'failed': {
       const base =
-        status.reason === 'access-required'
+        localFailureLabel(status) ??
+        (status.reason === 'access-required'
           ? ACCESS_REQUIRED_TITLE
           : status.reason === 'empty'
             ? 'No skills found'
-            : 'Offline'
+            : 'Offline')
       return { glyph: '×', text: status.stale ? `${base} — showing last snapshot` : base }
     }
     case 'synced':
@@ -146,21 +169,24 @@ export function registryOwnerLabel(registryUrl: string | undefined): string | nu
  * otherwise the automatic name. Mirrors the main-process `registryLabel` so
  * provenance reads identically on both sides of the seam.
  */
-export function registryRecordLabel(registry: {
-  githubOwner: string | null
-  githubRepo: string | null
-  url: string
-  name: string | null
-}): string {
+export function registryRecordLabel(
+  registry: Pick<
+    RegistryRecord,
+    'source' | 'automaticName' | 'githubOwner' | 'githubRepo' | 'url' | 'name'
+  >
+): string {
   return registry.name ?? automaticRegistryRecordName(registry)
 }
 
-/** Automatic name for a Registry record: `owner/repo` for GitHub, else host + path, else the raw URL. */
-export function automaticRegistryRecordName(registry: {
-  githubOwner: string | null
-  githubRepo: string | null
-  url: string
-}): string {
+/**
+ * Automatic name for a Registry record: the folder path with home shortened to
+ * `~` for a Local Registry, `owner/repo` for GitHub, else host + path, else the
+ * raw URL.
+ */
+export function automaticRegistryRecordName(
+  registry: Pick<RegistryRecord, 'source' | 'automaticName' | 'githubOwner' | 'githubRepo' | 'url'>
+): string {
+  if (registry.source === 'local') return registry.automaticName
   if (registry.githubOwner && registry.githubRepo) {
     return `${registry.githubOwner}/${registry.githubRepo}`
   }

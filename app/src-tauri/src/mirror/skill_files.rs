@@ -334,6 +334,7 @@ mod tests {
     use super::*;
     use crate::db::open_database;
     use crate::registries::{insert_registry, InsertRegistryInput};
+    use crate::types::RegistrySource;
     use std::os::unix::fs::symlink;
 
     struct Fixture {
@@ -350,6 +351,7 @@ mod tests {
             let registry = insert_registry(
                 &conn,
                 &InsertRegistryInput {
+                    source: RegistrySource::Git,
                     url: "https://github.com/example/skills".into(),
                     branch: "main".into(),
                     enabled: true,

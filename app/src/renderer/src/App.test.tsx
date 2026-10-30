@@ -24,6 +24,8 @@ import {
 const REG = 'reg-1'
 
 const DEFAULT_REGISTRY_RECORD: RegistryRecord = {
+  source: 'git',
+  automaticName: '',
   id: 'default',
   url: 'https://github.com/anthropics/skills',
   branch: 'main',
@@ -299,6 +301,8 @@ describe('App shell', () => {
 
   it('filters the catalogue by registry when multiple registries are configured', async () => {
     const secondRegistry: RegistryRecord = {
+      source: 'git',
+      automaticName: '',
       id: 'reg-2',
       url: 'https://github.com/example-org/skills',
       branch: 'main',
@@ -1102,7 +1106,8 @@ describe('Console sidebar', () => {
     await act(async () => {
       screen.getByRole('button', { name: 'Edit anthropics/skills' }).click()
     })
-    fireEvent.change(screen.getByLabelText('New registry URL'), {
+    startGitAdd()
+    fireEvent.change(screen.getByLabelText('Repository URL'), {
       target: { value: 'https://github.com/example/new-skills' },
     })
     expect(screen.getByRole('form', { name: 'Edit anthropics/skills' })).toBeInTheDocument()
@@ -1111,7 +1116,9 @@ describe('Console sidebar', () => {
     await openSettings()
 
     expect(screen.queryByRole('form', { name: 'Edit anthropics/skills' })).not.toBeInTheDocument()
-    expect(screen.getByLabelText('New registry URL')).toHaveValue('')
+    expect(screen.queryByRole('form', { name: 'Add registry' })).not.toBeInTheDocument()
+    startGitAdd()
+    expect(screen.getByLabelText('Repository URL')).toHaveValue('')
   })
 
   it('opens Settings with ⌘, and does not toggle it closed', async () => {
@@ -2081,6 +2088,15 @@ async function openSettings(): Promise<void> {
   await screen.findByRole('main', { name: 'Settings' })
 }
 
+function openAddMenu(): void {
+  fireEvent.click(screen.getByRole('button', { name: '+ Add registry' }))
+}
+
+function startGitAdd(): void {
+  openAddMenu()
+  fireEvent.click(screen.getByRole('menuitem', { name: /Git repository/ }))
+}
+
 describe('Settings registry list', () => {
   it('lists each registry as a row with url, branch, skill count, and sync state', async () => {
     const registries = [
@@ -2172,25 +2188,145 @@ describe('Settings registry list', () => {
     expect(api.syncRegistry).toHaveBeenCalledWith('team')
   })
 
-  it('offers an add card whose Add is disabled until a URL is entered and whose branch auto-detects', async () => {
+  it('offers a Git repository or a folder from the add menu at the foot of the registry list', async () => {
     render(<App api={fakeApi(syncStatus())} />)
     await screen.findByText('Synced')
     await openSettings()
-    const add = screen.getByRole('region', { name: 'Add registry' })
+    expect(screen.queryByRole('menu', { name: 'Add registry' })).not.toBeInTheDocument()
 
-    expect(within(add).getByLabelText('New registry branch')).toHaveAttribute(
-      'placeholder',
-      'auto-detect'
-    )
-    expect(
-      within(add).getByText('Branch is detected automatically when possible.')
-    ).toBeInTheDocument()
-    expect(within(add).getByRole('button', { name: 'Add registry' })).toBeDisabled()
+    openAddMenu()
+    const menu = screen.getByRole('menu', { name: 'Add registry' })
+    expect(within(menu).getByRole('menuitem', { name: /Git repository/ })).toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: /Folder on this Mac/ })).toBeInTheDocument()
 
-    fireEvent.change(within(add).getByLabelText('New registry URL'), {
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('menu', { name: 'Add registry' })).not.toBeInTheDocument()
+  })
+
+  it('opens a Git row whose Add waits for a URL and whose branch defaults until changed', async () => {
+    render(<App api={fakeApi(syncStatus())} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    startGitAdd()
+    const add = screen.getByRole('form', { name: 'Add registry' })
+
+    expect(within(add).getByRole('button', { name: 'Add' })).toBeDisabled()
+    expect(screen.queryByLabelText('Repository branch')).not.toBeInTheDocument()
+
+    fireEvent.change(within(add).getByLabelText('Repository URL'), {
       target: { value: 'https://github.com/example/team-skills' },
     })
-    expect(within(add).getByRole('button', { name: 'Add registry' })).toBeEnabled()
+    expect(within(add).getByRole('button', { name: 'Add' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: /Branch: default/ }))
+    expect(screen.getByLabelText('Repository branch')).toHaveAttribute(
+      'placeholder',
+      'default branch'
+    )
+
+    fireEvent.click(within(add).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('form', { name: 'Add registry' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '+ Add registry' })).toBeInTheDocument()
+  })
+
+  it('closes the add row when Escape is pressed in the expanded Branch field', async () => {
+    render(<App api={fakeApi(syncStatus())} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    startGitAdd()
+    fireEvent.click(screen.getByRole('button', { name: /Branch: default/ }))
+
+    const branch = screen.getByLabelText('Repository branch')
+    branch.focus()
+    fireEvent.keyDown(branch, { key: 'Escape' })
+
+    expect(screen.queryByRole('form', { name: 'Add registry' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Repository branch')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '+ Add registry' })).toBeInTheDocument()
+  })
+
+  it('hides branch controls for folder paths typed into the Git row and keeps them for Git URLs', async () => {
+    render(<App api={fakeApi(syncStatus())} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    startGitAdd()
+    for (const value of ['/Users/me/skills', '~/skills']) {
+      fireEvent.change(screen.getByLabelText('Repository URL'), { target: { value } })
+      expect(screen.queryByRole('button', { name: /Branch: default/ })).not.toBeInTheDocument()
+    }
+    fireEvent.change(screen.getByLabelText('Repository URL'), {
+      target: { value: 'file:///skills' },
+    })
+    expect(screen.getByRole('button', { name: /Branch: default/ })).toBeInTheDocument()
+  })
+
+  it('adds a picked folder from its own row and leaves the menu closed when the picker is cancelled', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      chooseRegistryFolder: vi.fn().mockResolvedValue(null),
+      addRegistry: vi.fn().mockResolvedValue(registryRecord({ id: 'local' })),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+
+    openAddMenu()
+    await act(async () => {
+      screen.getByRole('menuitem', { name: /Folder on this Mac/ }).click()
+    })
+    expect(screen.queryByRole('form', { name: 'Add registry' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menu', { name: 'Add registry' })).not.toBeInTheDocument()
+
+    vi.mocked(api.chooseRegistryFolder).mockResolvedValue('/Users/me/skills')
+    openAddMenu()
+    await act(async () => {
+      screen.getByRole('menuitem', { name: /Folder on this Mac/ }).click()
+    })
+    const add = screen.getByRole('form', { name: 'Add registry' })
+    expect(within(add).getByText('/Users/me/skills')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Branch: default/ })).not.toBeInTheDocument()
+
+    await act(async () => {
+      within(add).getByRole('button', { name: 'Add' }).click()
+    })
+    expect(api.addRegistry).toHaveBeenCalledWith({ url: '/Users/me/skills' })
+    expect(screen.queryByRole('form', { name: 'Add registry' })).not.toBeInTheDocument()
+  })
+
+  it('fills the edit URL from the folder picker and hides its Branch field', async () => {
+    const api = fakeApi(syncStatus(), [], {
+      chooseRegistryFolder: vi.fn().mockResolvedValue('~/other-skills'),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit anthropics/skills' }))
+    const edit = screen.getByRole('form', { name: 'Edit anthropics/skills' })
+    await act(async () => {
+      within(edit).getByRole('button', { name: 'Choose folder…' }).click()
+    })
+    expect(within(edit).getByLabelText('Registry URL')).toHaveValue('~/other-skills')
+    expect(within(edit).queryByLabelText('Branch')).not.toBeInTheDocument()
+  })
+
+  it('opens an existing local registry with its path and no Branch field', async () => {
+    const local = registryRecord({
+      source: 'local',
+      url: '/Users/me/skills',
+      branch: '',
+      automaticName: '~/skills',
+      githubOwner: null,
+      githubRepo: null,
+    })
+    render(
+      <App
+        api={fakeApi(syncStatus(), [], { listRegistries: vi.fn().mockResolvedValue([local]) })}
+      />
+    )
+    await screen.findByText('Synced')
+    await openSettings()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit ~/skills' }))
+    expect(screen.getByLabelText('Registry URL')).toHaveValue('/Users/me/skills')
+    expect(screen.queryByLabelText('Branch')).not.toBeInTheDocument()
   })
 
   it('adds a registry with an optional branch', async () => {
@@ -2202,11 +2338,12 @@ describe('Settings registry list', () => {
     await screen.findByText('Synced')
     await openSettings()
 
-    fireEvent.change(screen.getByLabelText('New registry URL'), {
+    startGitAdd()
+    fireEvent.change(screen.getByLabelText('Repository URL'), {
       target: { value: 'https://github.com/example/team-skills' },
     })
     await act(async () => {
-      screen.getByRole('button', { name: 'Add registry' }).click()
+      screen.getByRole('button', { name: 'Add' }).click()
     })
     expect(api.addRegistry).toHaveBeenCalledWith({
       url: 'https://github.com/example/team-skills',
@@ -2223,11 +2360,12 @@ describe('Settings registry list', () => {
     await screen.findByText('Synced')
     await openSettings()
 
-    fireEvent.change(screen.getByLabelText('New registry URL'), {
+    startGitAdd()
+    fireEvent.change(screen.getByLabelText('Repository URL'), {
       target: { value: 'https://user:tok@github.com/example/secret' },
     })
     await act(async () => {
-      screen.getByRole('button', { name: 'Add registry' }).click()
+      screen.getByRole('button', { name: 'Add' }).click()
     })
     expect(
       await screen.findByText(/Registry URL must not contain embedded credentials/)
@@ -2246,14 +2384,15 @@ describe('Settings registry list', () => {
     await screen.findByText('Synced')
     await openSettings()
 
-    fireEvent.change(screen.getByLabelText('New registry URL'), {
+    startGitAdd()
+    fireEvent.change(screen.getByLabelText('Repository URL'), {
       target: { value: 'https://example.com/private/skills' },
     })
     await act(async () => {
-      screen.getByRole('button', { name: 'Add registry' }).click()
+      screen.getByRole('button', { name: 'Add' }).click()
     })
     expect(await screen.findByText(/specify a branch for this registry/)).toBeInTheDocument()
-    expect(screen.getByLabelText('New registry branch')).toBeInTheDocument()
+    expect(screen.getByLabelText('Repository branch')).toBeInTheDocument()
   })
 
   it('shows stored Auto Update switches and saves either flipped value before reloading', async () => {
@@ -2980,6 +3119,8 @@ describe('Update all', () => {
 
   it('shows the count and an enabled action when Skills are behind, unaffected by search, registry filter, or view', async () => {
     const secondRegistry: RegistryRecord = {
+      source: 'git',
+      automaticName: '',
       id: 'reg-2',
       url: 'https://github.com/example-org/skills',
       branch: 'main',
@@ -4518,10 +4659,11 @@ it('waits for registry addition to finish before allowing App Update restart', a
   render(<App api={api} />)
   await screen.findByRole('button', { name: 'Restart to update' })
   fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
-  fireEvent.change(screen.getByLabelText('New registry URL'), {
+  startGitAdd()
+  fireEvent.change(screen.getByLabelText('Repository URL'), {
     target: { value: 'https://github.com/example/skills' },
   })
-  fireEvent.click(screen.getByRole('button', { name: 'Add registry' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }))
   expect(screen.getByRole('button', { name: 'Finishing current task…' })).toBeDisabled()
   await act(async () => complete(DEFAULT_REGISTRY_RECORD))
   expect(screen.getByRole('button', { name: 'Restart to update' })).toBeEnabled()

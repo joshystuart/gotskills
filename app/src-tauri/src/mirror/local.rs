@@ -1,0 +1,575 @@
+use std::fs;
+use std::io::{self, Read};
+use std::path::Path;
+use std::time::SystemTime;
+
+use sha2::{Digest, Sha256};
+
+use super::discovery::skills::{discover_skills, parse_skill_md, DiscoverSkillsOptions};
+use super::scan::{locale_compare, ScannedSkill};
+use crate::installer::copy::{copy_tree, paths_overlap};
+use crate::types::SyncFailureReason;
+
+/// A complete Local Registry snapshot and its content revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalSnapshot {
+    pub skills: Vec<ScannedSkill>,
+    pub revision: String,
+}
+
+/// Why a Local Registry snapshot failed. The last-good snapshot is kept.
+#[derive(Debug, thiserror::Error)]
+pub enum SnapshotError {
+    #[error("Registry folder not found")]
+    FolderNotFound,
+    #[error("Registry folder can't be read: {0}")]
+    FolderUnreadable(io::Error),
+    #[error("Registry folder changed during the snapshot")]
+    FolderChanged,
+    #[error("Couldn't save the snapshot: {0}")]
+    SaveFailed(io::Error),
+}
+
+impl SnapshotError {
+    pub fn reason(&self) -> SyncFailureReason {
+        match self {
+            SnapshotError::FolderNotFound => SyncFailureReason::FolderNotFound,
+            SnapshotError::FolderUnreadable(_) => SyncFailureReason::FolderUnreadable,
+            SnapshotError::FolderChanged => SyncFailureReason::FolderChanged,
+            SnapshotError::SaveFailed(_) => SyncFailureReason::SnapshotFailed,
+        }
+    }
+
+    fn opening(error: io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => SnapshotError::FolderNotFound,
+            _ => SnapshotError::FolderUnreadable(error),
+        }
+    }
+
+    fn reading(error: io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::NotFound => SnapshotError::FolderChanged,
+            io::ErrorKind::StorageFull
+            | io::ErrorKind::QuotaExceeded
+            | io::ErrorKind::ReadOnlyFilesystem => SnapshotError::SaveFailed(error),
+            _ => SnapshotError::FolderUnreadable(error),
+        }
+    }
+}
+
+fn hash_field(hash: &mut Sha256, bytes: &[u8]) {
+    hash.update((bytes.len() as u64).to_be_bytes());
+    hash.update(bytes);
+}
+
+fn hash_tree(root: &Path, directory: &Path, hash: &mut Sha256) -> io::Result<SystemTime> {
+    let mut entries = fs::read_dir(directory)?.collect::<io::Result<Vec<_>>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    let mut newest = SystemTime::UNIX_EPOCH;
+    for entry in entries {
+        let path = entry.path();
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            newest = newest.max(hash_tree(root, &path, hash)?);
+        } else {
+            let relative = path.strip_prefix(root).map_err(io::Error::other)?;
+            hash_field(
+                hash,
+                relative.to_string_lossy().replace('\\', "/").as_bytes(),
+            );
+            hash.update(metadata.len().to_be_bytes());
+            let mut file = fs::File::open(&path)?;
+            let mut buffer = [0; 65536];
+            loop {
+                let length = file.read(&mut buffer)?;
+                if length == 0 {
+                    break;
+                }
+                hash.update(&buffer[..length]);
+            }
+            newest = newest.max(metadata.modified()?);
+        }
+    }
+    Ok(newest)
+}
+
+/// Copy discovered skills into a last-good mirror without invoking Git.
+pub fn snapshot_local(source: &Path, destination: &Path) -> Result<LocalSnapshot, SnapshotError> {
+    snapshot_local_with(source, destination, Ok)
+}
+
+/// Keep the previous mirror until the new snapshot's catalogue is persisted.
+pub(super) fn snapshot_local_with<T, E>(
+    source: &Path,
+    destination: &Path,
+    persist: impl FnOnce(LocalSnapshot) -> Result<T, E>,
+) -> Result<T, E>
+where
+    E: From<SnapshotError>,
+{
+    let source_path = fs::canonicalize(source).map_err(SnapshotError::opening)?;
+    let source = source_path.as_path();
+    fs::read_dir(source).map_err(SnapshotError::opening)?;
+    let save_failed = |message: &str| SnapshotError::SaveFailed(io::Error::other(message));
+    if paths_overlap(source, destination) {
+        return Err(save_failed("Snapshot source and destination overlap").into());
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| save_failed("Missing destination parent"))?;
+    fs::create_dir_all(parent).map_err(SnapshotError::SaveFailed)?;
+    let suffix = uuid::Uuid::new_v4();
+    let staging = destination.with_extension(format!("snapshot-{suffix}"));
+    let result = (|| {
+        fs::create_dir(&staging).map_err(SnapshotError::SaveFailed)?;
+        let discovered = discover_skills(
+            source,
+            None,
+            DiscoverSkillsOptions {
+                strict_io: true,
+                ..Default::default()
+            },
+        )
+        .map_err(SnapshotError::reading)?;
+        let mut skills = Vec::new();
+        for skill in discovered {
+            let relative = skill
+                .path
+                .strip_prefix(source)
+                .map_err(|_| SnapshotError::FolderChanged)?;
+            let copied = staging.join(relative);
+            copy_tree(&skill.path, &copied, true).map_err(SnapshotError::reading)?;
+            let metadata = parse_skill_md(&copied.join("SKILL.md"), false)
+                .ok_or(SnapshotError::FolderChanged)?;
+            let mut hash = Sha256::new();
+            let updated =
+                hash_tree(&copied, &copied, &mut hash).map_err(SnapshotError::SaveFailed)?;
+            let content_hash = format!("{:x}", hash.finalize());
+            skills.push(ScannedSkill {
+                id: metadata.name.clone(),
+                skill_path: relative.to_string_lossy().replace('\\', "/"),
+                name: metadata.name,
+                description: metadata.description,
+                provenance_sha: content_hash[..7].to_string(),
+                content_hash,
+                updated_at: chrono::DateTime::<chrono::Utc>::from(updated)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                plugin_name: skill.plugin_name,
+            });
+        }
+        skills.sort_by(|a, b| locale_compare(&a.id, &b.id));
+        let mut revision = Sha256::new();
+        let mut by_path: Vec<_> = skills.iter().collect();
+        by_path.sort_by(|a, b| a.skill_path.cmp(&b.skill_path));
+        for skill in by_path {
+            hash_field(&mut revision, skill.skill_path.as_bytes());
+            hash_field(&mut revision, skill.content_hash.as_bytes());
+        }
+        let snapshot = LocalSnapshot {
+            skills,
+            revision: format!("{:x}", revision.finalize()),
+        };
+        Ok(snapshot)
+    })();
+    let result = result.map_err(|error| {
+        if source.is_dir() {
+            error
+        } else {
+            SnapshotError::FolderNotFound
+        }
+    });
+    let result = match result {
+        Ok(snapshot) => replace_mirror(&staging, destination, suffix, || persist(snapshot)),
+        Err(error) => Err(error.into()),
+    };
+    if result.is_err() {
+        let _ = fs::remove_dir_all(staging);
+    }
+    result
+}
+
+fn replace_mirror<T, E>(
+    staging: &Path,
+    destination: &Path,
+    suffix: uuid::Uuid,
+    persist: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E>
+where
+    E: From<SnapshotError>,
+{
+    let backup = destination
+        .exists()
+        .then(|| destination.with_extension(format!("backup-{suffix}")));
+    if let Some(backup) = &backup {
+        fs::rename(destination, backup).map_err(SnapshotError::SaveFailed)?;
+    }
+    if let Err(error) = fs::rename(staging, destination) {
+        if let Some(backup) = &backup {
+            fs::rename(backup, destination).map_err(SnapshotError::SaveFailed)?;
+        }
+        return Err(SnapshotError::SaveFailed(error).into());
+    }
+    match persist() {
+        Ok(value) => {
+            if let Some(backup) = backup {
+                let _ = fs::remove_dir_all(backup);
+            }
+            Ok(value)
+        }
+        Err(error) => {
+            fs::rename(destination, staging).map_err(SnapshotError::SaveFailed)?;
+            if let Some(backup) = backup {
+                fs::rename(backup, destination).map_err(SnapshotError::SaveFailed)?;
+            }
+            Err(error)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    fn write(root: &Path, path: &str, text: &str) {
+        let path = root.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    fn skill(root: &Path, path: &str, name: &str) {
+        write(
+            root,
+            &format!("{path}/SKILL.md"),
+            &format!("---\nname: {name}\ndescription: Example\n---\nBody"),
+        );
+    }
+
+    #[test]
+    fn snapshots_nested_skills_without_git() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, "skills/alpha", "alpha");
+        skill(&source, "skills/team/beta", "beta");
+        write(&source, "skills/alpha/assets/example.txt", "example");
+        let (result, count) = crate::mirror::git_exec::count_git_invocations(|| {
+            snapshot_local(&source, &destination)
+        });
+        let snapshot = result.unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(snapshot.skills.len(), 2);
+        assert_eq!(snapshot.skills[0].id, "alpha");
+        assert_eq!(snapshot.skills[0].skill_path, "skills/alpha");
+        assert_eq!(snapshot.skills[0].description, "Example");
+        assert_eq!(
+            snapshot.skills[0].provenance_sha,
+            snapshot.skills[0].content_hash[..7]
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join("skills/alpha/assets/example.txt")).unwrap(),
+            "example"
+        );
+    }
+    #[test]
+    fn exclusions_do_not_change_the_hash_or_enter_the_copy() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, ".", "root");
+        let before = snapshot_local(&source, &destination).unwrap();
+        for path in [
+            ".DS_Store",
+            "assets/.DS_Store",
+            ".git/config",
+            "metadata.json",
+            "__pycache__/a.pyc",
+            "__pypackages__/a",
+        ] {
+            write(&source, path, "ignored");
+        }
+        let after = snapshot_local(&source, &destination).unwrap();
+        assert_eq!(before.revision, after.revision);
+        assert_eq!(before.skills[0].content_hash, after.skills[0].content_hash);
+        for path in [
+            ".DS_Store",
+            "assets/.DS_Store",
+            ".git",
+            "metadata.json",
+            "__pycache__",
+            "__pypackages__",
+        ] {
+            assert!(!destination.join(path).exists(), "{path}");
+        }
+    }
+
+    #[test]
+    fn updated_date_uses_the_newest_copied_file_time() {
+        use std::time::Duration;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, ".", "root");
+        write(&source, "assets/file.txt", "data");
+        write(&source, ".DS_Store", "ignored");
+        for (path, seconds) in [
+            ("SKILL.md", 1_700_000_000),
+            ("assets/file.txt", 1_700_000_100),
+        ] {
+            fs::File::options()
+                .write(true)
+                .open(source.join(path))
+                .unwrap()
+                .set_times(
+                    fs::FileTimes::new()
+                        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds)),
+                )
+                .unwrap();
+        }
+        let snapshot = snapshot_local(&source, &destination).unwrap();
+        assert_eq!(snapshot.skills[0].skill_path, "");
+        assert_eq!(snapshot.skills[0].updated_at, "2023-11-14T22:15:00.000Z");
+    }
+
+    #[test]
+    fn content_and_paths_define_revisions_while_timestamps_do_not() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, "skills/alpha", "alpha");
+        let first = snapshot_local(&source, &destination).unwrap();
+        assert_eq!(
+            snapshot_local(&source, &destination).unwrap().revision,
+            first.revision
+        );
+        let file = fs::File::options()
+            .write(true)
+            .open(source.join("skills/alpha/SKILL.md"))
+            .unwrap();
+        file.set_times(fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH))
+            .unwrap();
+        assert_eq!(
+            snapshot_local(&source, &destination).unwrap().revision,
+            first.revision
+        );
+        write(&source, "skills/alpha/real.txt", "one");
+        let added = snapshot_local(&source, &destination).unwrap();
+        assert_ne!(added.skills[0].content_hash, first.skills[0].content_hash);
+        assert_ne!(added.revision, first.revision);
+        write(&source, "skills/alpha/real.txt", "two");
+        let edited = snapshot_local(&source, &destination).unwrap();
+        assert_ne!(edited.revision, added.revision);
+        fs::rename(
+            source.join("skills/alpha/real.txt"),
+            source.join("skills/alpha/moved.txt"),
+        )
+        .unwrap();
+        let renamed_file = snapshot_local(&source, &destination).unwrap();
+        assert_ne!(renamed_file.revision, edited.revision);
+        fs::rename(source.join("skills/alpha"), source.join("skills/renamed")).unwrap();
+        let renamed_skill = snapshot_local(&source, &destination).unwrap();
+        assert_eq!(
+            renamed_skill.skills[0].content_hash,
+            renamed_file.skills[0].content_hash
+        );
+        assert_ne!(renamed_skill.revision, renamed_file.revision);
+        fs::remove_dir_all(source.join("skills/renamed")).unwrap();
+        assert_ne!(
+            snapshot_local(&source, &destination).unwrap().revision,
+            renamed_skill.revision
+        );
+        assert!(!destination.join("skills/renamed").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn follows_file_and_directory_symlinks_and_skips_broken_links() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, ".", "root");
+        write(root.path(), "external/data.txt", "linked content");
+        symlink(
+            root.path().join("external/data.txt"),
+            source.join("linked.txt"),
+        )
+        .unwrap();
+        symlink(root.path().join("external"), source.join("linked-dir")).unwrap();
+        symlink(root.path().join("external"), source.join(".git")).unwrap();
+        let before = snapshot_local(&source, &destination).unwrap();
+        symlink(root.path().join("absent"), source.join("broken")).unwrap();
+        let after = snapshot_local(&source, &destination).unwrap();
+        assert_eq!(before.revision, after.revision);
+        for path in ["linked.txt", "linked-dir/data.txt"] {
+            assert_eq!(
+                fs::read_to_string(destination.join(path)).unwrap(),
+                "linked content"
+            );
+            assert!(!fs::symlink_metadata(destination.join(path))
+                .unwrap()
+                .file_type()
+                .is_symlink());
+        }
+        assert!(!destination.join("broken").exists());
+        assert!(!destination.join(".git").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_nested_skill_keeps_the_last_snapshot() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, "skills/alpha", "alpha");
+        snapshot_local(&source, &destination).unwrap();
+        let before = fs::read(destination.join("skills/alpha/SKILL.md")).unwrap();
+        let path = source.join("skills/alpha");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = snapshot_local(&source, &destination);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(result, Err(SnapshotError::FolderUnreadable(_))));
+        assert_eq!(
+            fs::read(destination.join("skills/alpha/SKILL.md")).unwrap(),
+            before
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_nested_skill_metadata_keeps_the_last_snapshot() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, "skills/alpha", "alpha");
+        snapshot_local(&source, &destination).unwrap();
+        let before = fs::read(destination.join("skills/alpha/SKILL.md")).unwrap();
+        let path = source.join("skills/alpha/SKILL.md");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = snapshot_local(&source, &destination);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(result, Err(SnapshotError::FolderUnreadable(_))));
+        assert_eq!(
+            fs::read(destination.join("skills/alpha/SKILL.md")).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn concurrent_saves_publish_metadata_matching_the_snapshot() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, ".", "alpha");
+        let running = Arc::new(AtomicBool::new(true));
+        let save = running.clone();
+        let path = source.clone();
+        let writer = std::thread::spawn(move || {
+            let mut count = 0;
+            while save.load(Ordering::Relaxed) {
+                let name = if count % 2 == 0 { "alpha" } else { "beta" };
+                fs::write(
+                    path.parent().unwrap().join("next.md"),
+                    format!("---\nname: {name}\ndescription: {name}\n---\nBody"),
+                )
+                .unwrap();
+                fs::rename(
+                    path.parent().unwrap().join("next.md"),
+                    path.join("SKILL.md"),
+                )
+                .unwrap();
+                count += 1;
+            }
+        });
+        let mut mismatch = None;
+        for _ in 0..100 {
+            let snapshot = snapshot_local(&source, &destination).unwrap();
+            let copied = super::super::discovery::skills::parse_skill_md(
+                &destination.join("SKILL.md"),
+                false,
+            )
+            .unwrap();
+            if snapshot.skills[0].name != copied.name
+                || snapshot.skills[0].description != copied.description
+            {
+                mismatch = Some((snapshot.skills[0].clone(), copied));
+                break;
+            }
+        }
+        running.store(false, Ordering::Relaxed);
+        writer.join().unwrap();
+        assert!(mismatch.is_none(), "{mismatch:?}");
+    }
+
+    #[test]
+    fn missing_source_keeps_the_last_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, ".", "root");
+        snapshot_local(&source, &destination).unwrap();
+        let before = fs::read(destination.join("SKILL.md")).unwrap();
+        fs::remove_dir_all(&source).unwrap();
+        assert!(matches!(
+            snapshot_local(&source, &destination),
+            Err(SnapshotError::FolderNotFound)
+        ));
+        assert_eq!(fs::read(destination.join("SKILL.md")).unwrap(), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_source_or_failed_copy_keeps_the_last_snapshot() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let destination = root.path().join("mirror");
+        skill(&source, ".", "root");
+        snapshot_local(&source, &destination).unwrap();
+        let before = fs::read(destination.join("SKILL.md")).unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = snapshot_local(&source, &destination);
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(result, Err(SnapshotError::FolderUnreadable(_))));
+        assert_eq!(fs::read(destination.join("SKILL.md")).unwrap(), before);
+        write(&source, "new.txt", "not copied");
+        fs::set_permissions(source.join("new.txt"), fs::Permissions::from_mode(0o000)).unwrap();
+        let result = snapshot_local(&source, &destination);
+        fs::set_permissions(source.join("new.txt"), fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(result, Err(SnapshotError::FolderUnreadable(_))));
+        assert_eq!(fs::read(destination.join("SKILL.md")).unwrap(), before);
+        assert!(!destination.join("new.txt").exists());
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unwritable_mirror_reports_a_failed_save() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let mirrors = root.path().join("mirrors");
+        skill(&source, ".", "root");
+        fs::create_dir(&mirrors).unwrap();
+        fs::set_permissions(&mirrors, fs::Permissions::from_mode(0o555)).unwrap();
+        let result = snapshot_local(&source, &mirrors.join("registry"));
+        fs::set_permissions(&mirrors, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(result, Err(SnapshotError::SaveFailed(_))));
+    }
+
+    #[test]
+    fn files_vanishing_mid_read_report_a_changed_folder() {
+        let error = SnapshotError::reading(io::Error::from(io::ErrorKind::NotFound));
+        assert_eq!(error.reason(), SyncFailureReason::FolderChanged);
+        let error = SnapshotError::reading(io::Error::from(io::ErrorKind::StorageFull));
+        assert_eq!(error.reason(), SyncFailureReason::SnapshotFailed);
+    }
+}

@@ -8,6 +8,7 @@
 
 pub mod app_update;
 pub mod appearance;
+mod local_watch;
 pub mod registry_menu;
 
 #[cfg(test)]
@@ -43,8 +44,8 @@ use crate::mirror::skill_files::{list_skill_files, read_skill_file, SkillFilesDe
 use crate::mirror::sync::{sync_registry, SyncRegistryConfig, SyncWriteResult};
 use crate::registries::{
     find_by_canonical_key, get_marker, get_registry, hard_delete_registry, insert_registry,
-    list_registries, registry_label, soft_remove_registry, update_registry, InsertRegistryInput,
-    StoredRegistry, UpdateRegistryFields,
+    list_registries, soft_remove_registry, update_registry, InsertRegistryInput, StoredRegistry,
+    UpdateRegistryFields,
 };
 use crate::registry_url::canonicalize_registry_url;
 use crate::telemetry::TelemetryEventType;
@@ -55,9 +56,9 @@ use crate::telemetry::{
 use crate::types::{
     skill_id, AddRegistryRequest, Appearance, AppearancePatch, AutoUpdateFailure, AutoUpdateResult,
     AutoUpdatedSkill, CatalogueSnapshot, FontSize, InstallRequest, InstallResult,
-    InstallTargetStatus, ReconcileReport, ReconcileState, RegistryRecord, RegistrySyncStatus,
-    SkillFileContent, SkillFileList, SkillFileReadRequest, SkillFileRequest, SyncAllResult,
-    SyncFailureReason, SyncPhase, SyncStatus, TargetDetection, TargetOutcome, Theme,
+    InstallTargetStatus, ReconcileReport, ReconcileState, RegistryRecord, RegistrySource,
+    RegistrySyncStatus, SkillFileContent, SkillFileList, SkillFileReadRequest, SkillFileRequest,
+    SyncAllResult, SyncFailureReason, SyncPhase, SyncStatus, TargetDetection, TargetOutcome, Theme,
     UninstallRequest, UninstallResult, UninstallTargetResult, UpdateRegistryRequest,
     MAX_REGISTRY_NAME_LENGTH,
 };
@@ -151,6 +152,10 @@ fn marker_status_for(reason: SyncFailureReason) -> SyncMarkerStatus {
         SyncFailureReason::Offline => SyncMarkerStatus::Offline,
         SyncFailureReason::Empty => SyncMarkerStatus::Empty,
         SyncFailureReason::AccessRequired => SyncMarkerStatus::AccessRequired,
+        SyncFailureReason::FolderNotFound => SyncMarkerStatus::FolderNotFound,
+        SyncFailureReason::FolderUnreadable => SyncMarkerStatus::FolderUnreadable,
+        SyncFailureReason::FolderChanged => SyncMarkerStatus::FolderChanged,
+        SyncFailureReason::SnapshotFailed => SyncMarkerStatus::SnapshotFailed,
     }
 }
 
@@ -160,6 +165,20 @@ fn is_hex_colour(value: &str) -> bool {
 
 /// The application backend: state plus every operation the commands expose.
 pub struct Backend {
+    inner: Arc<BackendState>,
+}
+
+impl std::ops::Deref for Backend {
+    type Target = BackendState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+/// Shared backend state; filesystem watchers retain only weak references.
+pub struct BackendState {
+    watches: Mutex<BTreeMap<String, local_watch::LocalWatch>>,
     conn: Mutex<Connection>,
     paths: DataPaths,
     environment: Environment,
@@ -218,20 +237,24 @@ impl Backend {
         telemetry.emit(&conn, EmitInput::new(TelemetryEventType::SessionStarted))?;
 
         let backend = Backend {
-            conn: Mutex::new(conn),
-            paths,
-            environment,
-            telemetry,
-            mirror_mutexes: Mutex::new(BTreeMap::new()),
-            events,
-            runtime: Mutex::new(RuntimeState::default()),
-            sync_done: Condvar::new(),
-            sync_impl: sync_override.unwrap_or_else(|| Arc::new(sync_registry)),
+            inner: Arc::new(BackendState {
+                watches: Mutex::new(BTreeMap::new()),
+                conn: Mutex::new(conn),
+                paths,
+                environment,
+                telemetry,
+                mirror_mutexes: Mutex::new(BTreeMap::new()),
+                events,
+                runtime: Mutex::new(RuntimeState::default()),
+                sync_done: Condvar::new(),
+                sync_impl: sync_override.unwrap_or_else(|| Arc::new(sync_registry)),
+            }),
         };
         if list_registries(&backend.db(), true)?.is_empty() {
             backend.seed_default_registry();
         }
         backend.finish_interrupted_removals()?;
+        backend.refresh_local_watches();
         Ok(backend)
     }
 
@@ -256,6 +279,7 @@ impl Backend {
         let _ = insert_registry(
             &self.db(),
             &InsertRegistryInput {
+                source: RegistrySource::Git,
                 url: DEFAULT_REGISTRY.url.to_string(),
                 branch: DEFAULT_REGISTRY.branch.to_string(),
                 enabled: true,
@@ -330,8 +354,17 @@ impl Backend {
         }
     }
 
+    fn registry_label(&self, registry: &StoredRegistry) -> String {
+        crate::registries::registry_label(registry, &self.environment.home)
+    }
+
     fn to_record(&self, conn: &Connection, registry: &StoredRegistry) -> AppResult<RegistryRecord> {
         Ok(RegistryRecord {
+            source: registry.source,
+            automatic_name: crate::registries::automatic_registry_name(
+                registry,
+                &self.environment.home,
+            ),
             id: registry.id.clone(),
             url: registry.url.clone(),
             branch: registry.branch.clone(),
@@ -380,7 +413,7 @@ impl Backend {
     }
 
     fn sync_locked(&self, registry: &StoredRegistry) -> AppResult<(RegistrySyncStatus, bool)> {
-        if !is_git_available() {
+        if registry.source == RegistrySource::Git && !is_git_available() {
             let conn = self.db();
             record_sync_failure(&conn, &registry.id, SyncMarkerStatus::Offline)?;
             return Ok((
@@ -389,6 +422,7 @@ impl Backend {
             ));
         }
         let config = SyncRegistryConfig {
+            source: registry.source,
             registry_id: registry.id.clone(),
             url: registry.url.clone(),
             branch: registry.branch.clone(),
@@ -407,7 +441,13 @@ impl Backend {
                 self.telemetry.emit(&conn, event)?;
             }
             Err(error) => {
-                let reason = classify_git_error(&redact_git_error(&error.message));
+                let reason = match (registry.source, error.reason) {
+                    (_, Some(reason)) => reason,
+                    (RegistrySource::Local, None) => SyncFailureReason::SnapshotFailed,
+                    (RegistrySource::Git, None) => {
+                        classify_git_error(&redact_git_error(&error.message))
+                    }
+                };
                 record_sync_failure(&conn, &registry.id, marker_status_for(reason))?;
             }
         }
@@ -420,25 +460,57 @@ impl Backend {
     /// Sync one registry; concurrent requests for the same id wait for the
     /// running sync and share its result.
     fn do_sync(&self, registry: &StoredRegistry) -> AppResult<RegistrySyncStatus> {
-        {
-            let mut runtime = self.runtime();
-            if runtime.in_flight.contains(&registry.id) {
-                while runtime.in_flight.contains(&registry.id) {
-                    runtime = self
-                        .sync_done
-                        .wait(runtime)
-                        .unwrap_or_else(|p| p.into_inner());
-                }
-                drop(runtime);
-                return self.registry_status(&self.db(), &registry.id);
-            }
-            runtime.in_flight.insert(registry.id.clone());
+        let (runtime, waited) = self.wait_for_running_sync(&registry.id);
+        if waited {
+            drop(runtime);
+            return self.registry_status(&self.db(), &registry.id);
         }
-        self.signal_busy_change();
-        let _guard = InFlightGuard {
-            backend: self,
-            registry_id: registry.id.clone(),
+        let _guard = self.claim_sync(runtime, &registry.id);
+        self.sync_and_auto_update(registry)
+    }
+
+    /// Sync a registry whose folder changed. Unlike [`Self::do_sync`], a
+    /// running sync isn't shared: this waits for it, then syncs again with the
+    /// registry re-read, so changes made during that sync are picked up.
+    fn sync_after_change(&self, registry_id: &str) -> AppResult<RegistrySyncStatus> {
+        let (runtime, _) = self.wait_for_running_sync(registry_id);
+        let _guard = self.claim_sync(runtime, registry_id);
+        let Some(registry) =
+            get_registry(&self.db(), registry_id)?.filter(|registry| registry.is_watchable())
+        else {
+            return self.registry_status(&self.db(), registry_id);
         };
+        self.sync_and_auto_update(&registry)
+    }
+
+    /// Block until no sync of `registry_id` is running; true when one was.
+    fn wait_for_running_sync(&self, registry_id: &str) -> (MutexGuard<'_, RuntimeState>, bool) {
+        let mut runtime = self.runtime();
+        let waited = runtime.in_flight.contains(registry_id);
+        while runtime.in_flight.contains(registry_id) {
+            runtime = self
+                .sync_done
+                .wait(runtime)
+                .unwrap_or_else(|p| p.into_inner());
+        }
+        (runtime, waited)
+    }
+
+    fn claim_sync(
+        &self,
+        mut runtime: MutexGuard<'_, RuntimeState>,
+        registry_id: &str,
+    ) -> InFlightGuard<'_> {
+        runtime.in_flight.insert(registry_id.to_string());
+        drop(runtime);
+        self.signal_busy_change();
+        InFlightGuard {
+            backend: self,
+            registry_id: registry_id.to_string(),
+        }
+    }
+
+    fn sync_and_auto_update(&self, registry: &StoredRegistry) -> AppResult<RegistrySyncStatus> {
         let (status, scanned) = self.sync_exclusive(registry)?;
         if status.phase == SyncPhase::Synced && scanned {
             self.apply_auto_updates(&registry.id)?;
@@ -459,7 +531,7 @@ impl Backend {
             let conn = self.db();
             let report = self.reconcile_report(&conn, None, None)?;
             let records = read_install_records(&conn, &InstallRecordFilter::default())?;
-            let skills = read_catalogue(&conn, &report, &records)?.skills;
+            let skills = read_catalogue(&conn, &report, &records, &self.environment.home)?.skills;
             let scoped = self.reconcile_report(&conn, Some(registry_id), None)?;
             let mut pending: BTreeMap<String, Vec<String>> = BTreeMap::new();
             for entry in scoped
@@ -477,10 +549,10 @@ impl Backend {
         if pending.is_empty() {
             return Ok(());
         }
-        let mirror_revision = git(&self.paths.mirror(registry_id), &["rev-parse", "HEAD"])?;
+        let mirror_revision = self.snapshot_revision(registry_id)?;
         let mut result = AutoUpdateResult {
             registry_id: registry_id.to_string(),
-            registry_label: registry_label(&registry),
+            registry_label: self.registry_label(&registry),
             updated: Vec::new(),
             failed: Vec::new(),
         };
@@ -721,6 +793,19 @@ impl Backend {
         })
     }
 
+    fn snapshot_revision(&self, id: &str) -> AppResult<String> {
+        let conn = self.db();
+        let registry =
+            get_registry(&conn, id)?.ok_or_else(|| AppError::not_found("Registry not found"))?;
+        if registry.source == RegistrySource::Local {
+            return get_marker(&conn, id)?
+                .and_then(|marker| marker.last_sync_revision)
+                .ok_or_else(|| AppError::failed("Registry has no snapshot"));
+        }
+        drop(conn);
+        Ok(git(&self.paths.mirror(id), &["rev-parse", "HEAD"])?)
+    }
+
     fn install_locked(
         &self,
         request: &InstallRequest,
@@ -751,7 +836,7 @@ impl Backend {
             }
         }
         let mirror_path = self.paths.mirror(id);
-        let current_revision = git(&mirror_path, &["rev-parse", "HEAD"])?;
+        let current_revision = self.snapshot_revision(id)?;
         let mut request = request.clone();
         if only_update_available {
             let report = self.reconcile_report(
@@ -876,7 +961,7 @@ impl Backend {
         let conn = self.db();
         let report = self.reconcile_report(&conn, None, None)?;
         let records = read_install_records(&conn, &InstallRecordFilter::default())?;
-        let snapshot = read_catalogue(&conn, &report, &records)?;
+        let snapshot = read_catalogue(&conn, &report, &records, &self.environment.home)?;
         Ok(CatalogueSnapshot {
             skills: snapshot.skills,
             sync_status: self.compute_status_with(&conn)?,
@@ -899,38 +984,67 @@ impl Backend {
             .collect()
     }
 
+    fn canonical_registry(&self, url: &str) -> AppResult<crate::registry_url::CanonicalRegistry> {
+        let mut canonical = canonicalize_registry_url(url)?;
+        if canonical.source == RegistrySource::Local {
+            let expanded = if url.trim() == "~" {
+                self.environment.home.clone()
+            } else if url.trim().starts_with("~/") {
+                self.environment.home.join(&url.trim()[2..])
+            } else {
+                std::path::PathBuf::from(url.trim())
+            };
+            let path = std::fs::canonicalize(expanded).map_err(|error| {
+                AppError::failed(format!("Cannot open registry folder: {error}"))
+            })?;
+            let home = std::fs::canonicalize(&self.environment.home)?;
+            let data = std::fs::canonicalize(&self.paths.root)?;
+            if !path.is_dir() {
+                return Err(AppError::failed("Registry folder must be a directory"));
+            }
+            if path.parent().is_none() || path == home || data.starts_with(&path) {
+                return Err(AppError::failed("Registry folder cannot be the filesystem root, your home folder, or contain the app data folder"));
+            }
+            canonical.url = path.to_string_lossy().into_owned();
+            canonical.canonical_key = format!("local:{}", canonical.url);
+        }
+        Ok(canonical)
+    }
+
+    fn registry_branch(&self, branch: Option<&str>, url: &str) -> AppResult<String> {
+        if let Some(branch) = branch.map(str::trim).filter(|branch| !branch.is_empty()) {
+            return Ok(branch.to_string());
+        }
+        if !is_git_available() {
+            return Err(AppError::failed(
+                "Git is unavailable; specify a branch for this registry.",
+            ));
+        }
+        detect_default_branch(url).map_err(|_| {
+            AppError::failed(
+                "Could not detect the default branch; specify a branch for this registry.",
+            )
+        })
+    }
+
     pub fn add_registry(&self, request: &AddRegistryRequest) -> AppResult<RegistryRecord> {
-        let canonical = canonicalize_registry_url(&request.url)?;
+        let canonical = self.canonical_registry(&request.url)?;
         if let Some(existing) = find_by_canonical_key(&self.db(), &canonical.canonical_key)? {
             return Err(AppError::failed(format!(
                 "A registry for {} is already configured (id {}).",
-                registry_label(&existing),
+                self.registry_label(&existing),
                 existing.id
             )));
         }
-        let branch = match request
-            .branch
-            .as_deref()
-            .map(str::trim)
-            .filter(|b| !b.is_empty())
-        {
-            Some(branch) => branch.to_string(),
-            None => {
-                if !is_git_available() {
-                    return Err(AppError::failed(
-                        "Git is unavailable; specify a branch for this registry.",
-                    ));
-                }
-                detect_default_branch(&canonical.url).map_err(|_| {
-                    AppError::failed(
-                        "Could not detect the default branch; specify a branch for this registry.",
-                    )
-                })?
-            }
+        let branch = if canonical.source == RegistrySource::Local {
+            String::new()
+        } else {
+            self.registry_branch(request.branch.as_deref(), &canonical.url)?
         };
         let stored = insert_registry(
             &self.db(),
             &InsertRegistryInput {
+                source: canonical.source,
                 url: canonical.url,
                 branch,
                 enabled: request.enabled.unwrap_or(true),
@@ -943,6 +1057,7 @@ impl Backend {
         if stored.enabled {
             self.do_sync(&stored)?;
         }
+        self.refresh_local_watches();
         self.events.catalogue_updated();
         self.emit_status();
         self.registry_record(&stored.id)
@@ -977,28 +1092,37 @@ impl Backend {
                 .as_deref()
                 .filter(|url| url.trim() != current.url)
             {
-                let canonical = canonicalize_registry_url(url)?;
+                let canonical = self.canonical_registry(url)?;
                 if let Some(clash) = find_by_canonical_key(&conn, &canonical.canonical_key)?
                     .filter(|clash| clash.id != current.id)
                 {
                     return Err(AppError::failed(format!(
                         "A registry for {} is already configured (id {}).",
-                        registry_label(&clash),
+                        self.registry_label(&clash),
                         clash.id
                     )));
+                }
+                fields.source = Some(canonical.source);
+                if canonical.source == RegistrySource::Local {
+                    fields.branch = Some(String::new());
+                } else if current.source == RegistrySource::Local {
+                    fields.branch =
+                        Some(self.registry_branch(request.branch.as_deref(), &canonical.url)?);
                 }
                 fields.url = Some(canonical.url);
                 fields.github_owner = Some(canonical.github_owner);
                 fields.github_repo = Some(canonical.github_repo);
                 fields.canonical_key = Some(canonical.canonical_key);
             }
-            if let Some(branch) = request
-                .branch
-                .as_deref()
-                .map(str::trim)
-                .filter(|b| !b.is_empty() && *b != current.branch)
-            {
-                fields.branch = Some(branch.to_string());
+            if fields.source.unwrap_or(current.source) == RegistrySource::Git {
+                if let Some(branch) = request
+                    .branch
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|b| !b.is_empty() && *b != current.branch)
+                {
+                    fields.branch = Some(branch.to_string());
+                }
             }
             fields.enabled = request.enabled;
             fields.auto_update = request.auto_update;
@@ -1023,6 +1147,7 @@ impl Backend {
         };
         let url_or_branch_changed = fields.url.is_some() || fields.branch.is_some();
         let updated = update_registry(&self.db(), &request.id, fields)?;
+        self.refresh_local_watches();
         let enabled_from_disabled = request.enabled == Some(true) && !current.enabled;
         let auto_update_enabled = request.auto_update == Some(true) && !current.auto_update;
         if updated.enabled
@@ -1040,6 +1165,7 @@ impl Backend {
             return Ok(());
         }
         soft_remove_registry(&self.db(), id)?;
+        self.refresh_local_watches();
         self.cleanup_orphan_if_exhausted(id)?;
         self.events.catalogue_updated();
         self.emit_status();

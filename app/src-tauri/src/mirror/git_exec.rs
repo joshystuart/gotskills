@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use super::local::SnapshotError;
 use crate::error::AppError;
+use crate::types::SyncFailureReason;
 
 /// Environment overrides that force non-interactive git: never prompt on a
 /// terminal, never invoke a credential helper or askpass GUI.
@@ -17,16 +19,29 @@ const NON_INTERACTIVE_ARGS: [&str; 4] = ["-c", "credential.helper=", "-c", "core
 
 /// A failed git invocation or a failed mirror operation. `message` is the raw,
 /// unredacted text (for [`crate::mirror::git_errors::classify_git_error`]).
+/// `reason` is set when the failure is already classified, such as a Local
+/// Registry snapshot error.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct GitError {
     pub message: String,
+    pub reason: Option<SyncFailureReason>,
 }
 
 impl GitError {
     pub fn new(message: impl Into<String>) -> Self {
         GitError {
             message: message.into(),
+            reason: None,
+        }
+    }
+}
+
+impl From<SnapshotError> for GitError {
+    fn from(error: SnapshotError) -> Self {
+        GitError {
+            message: error.to_string(),
+            reason: Some(error.reason()),
         }
     }
 }

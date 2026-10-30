@@ -12,9 +12,17 @@ export type CatalogueSyncPhase = SyncPhase | 'partial'
  * `access-required` covers GitHub's ambiguous not-found / auth failures —
  * the app cannot distinguish them and must not claim it can.
  */
-export type SyncFailureReason = 'offline' | 'empty' | 'access-required'
+export type SyncFailureReason =
+  | 'offline'
+  | 'empty'
+  | 'access-required'
+  | 'folder-not-found'
+  | 'folder-unreadable'
+  | 'folder-changed'
+  | 'snapshot-failed'
 
 export interface RegistrySyncStatus {
+  folderPath?: string
   registryId: string
   phase: SyncPhase
   /** ISO-8601 of the last successful sync for this Registry, or null if never. */
@@ -105,7 +113,11 @@ export interface CatalogueSnapshot {
   syncStatus: SyncStatus
 }
 
+export type RegistrySource = 'git' | 'local'
+
 export interface RegistryRecord {
+  source: RegistrySource
+  automaticName: string
   id: string
   url: string
   branch: string
@@ -384,6 +396,7 @@ export interface RegistryMenuRequest {
 }
 
 export interface RegistryMenuApi {
+  chooseRegistryFolder(): Promise<string | null>
   /** Show the native registry menu; resolves to the renderer action chosen, or null. */
   showRegistryMenu(req: RegistryMenuRequest): Promise<RegistryMenuAction | null>
 }
@@ -415,6 +428,7 @@ export interface RendererApi
  * `installation-collision` carries occupant, folderName and target.
  */
 export const IpcRequest = {
+  chooseRegistryFolder: 'registry:chooseFolder',
   getAppUpdateState: 'appUpdate:getState',
   checkAppUpdate: 'appUpdate:check',
   getAutoDownloadAppUpdates: 'appUpdate:getAutoDownload',

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { isLocalPath } from '../../shared/registryUrl'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { FormEvent, JSX } from 'react'
 import {
   MAX_REGISTRY_NAME_LENGTH,
@@ -13,6 +14,7 @@ import {
   registryRecordLabel,
   registryStatusLabel,
 } from './cataloguePresentation'
+import { AddRegistryRow, type AddRegistryForm } from './AddRegistryRow'
 
 interface RegistryEditForm {
   editingId: string | null
@@ -20,6 +22,7 @@ interface RegistryEditForm {
   branch: string
   name: string
   branchWarn: boolean
+  onChooseFolder: () => void
   onUrlChange: (url: string) => void
   onBranchChange: (branch: string) => void
   onNameChange: (name: string) => void
@@ -27,16 +30,6 @@ interface RegistryEditForm {
   onCancel: () => void
   onAttempt: (event: FormEvent, registry: RegistryRecord) => void
   onCommit: (registry: RegistryRecord) => void
-}
-
-interface AddRegistryForm {
-  url: string
-  branch: string
-  busy: boolean
-  error: string | null
-  onUrlChange: (url: string) => void
-  onBranchChange: (branch: string) => void
-  onSubmit: (event: FormEvent) => void
 }
 
 interface SettingsViewProps {
@@ -259,6 +252,7 @@ interface RegistryEditRowProps {
 
 function RegistryEditRow({ registry, registryBusy, form }: RegistryEditRowProps): JSX.Element {
   const name = registryRecordLabel(registry)
+  const urlId = useId()
 
   return (
     <li className="registry-item editing">
@@ -272,8 +266,8 @@ function RegistryEditRow({ registry, registryBusy, form }: RegistryEditRowProps)
         aria-label={`Edit ${name}`}
         onSubmit={(e) => form.onAttempt(e, registry)}
       >
-        <div className="fields">
-          <label className="field field-wide">
+        <div className="edit-fields">
+          <label className="field">
             <span className="field-label">Name</span>
             <input
               className="field-input field-input-text"
@@ -285,28 +279,38 @@ function RegistryEditRow({ registry, registryBusy, form }: RegistryEditRowProps)
               autoComplete="off"
             />
           </label>
-          <label className="field">
-            <span className="field-label">Registry URL</span>
-            <input
-              className="field-input"
-              type="text"
-              value={form.url}
-              onChange={(e) => form.onUrlChange(e.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Branch</span>
-            <input
-              className="field-input"
-              type="text"
-              value={form.branch}
-              onChange={(e) => form.onBranchChange(e.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </label>
+          <div className="field">
+            <label className="field-label" htmlFor={urlId}>
+              Registry URL
+            </label>
+            <div className="field-row">
+              <input
+                id={urlId}
+                className="field-input"
+                type="text"
+                value={form.url}
+                onChange={(e) => form.onUrlChange(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <button type="button" className="secondary" onClick={form.onChooseFolder}>
+                Choose folder…
+              </button>
+            </div>
+          </div>
+          {!isLocalPath(form.url) ? (
+            <label className="field">
+              <span className="field-label">Branch</span>
+              <input
+                className="field-input"
+                type="text"
+                value={form.branch}
+                onChange={(e) => form.onBranchChange(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+          ) : null}
         </div>
         {form.branchWarn ? (
           <p className="callout warn" role="alert">
@@ -480,62 +484,13 @@ export function SettingsView({
                 />
               )
             )}
+            <AddRegistryRow form={addForm} />
           </ul>
           {registryError ? (
             <p className="settings-error" role="alert">
               {registryError}
             </p>
           ) : null}
-        </section>
-
-        <section className="settings-section" aria-label="Add registry">
-          <h2 className="settings-subtitle">Add a registry</h2>
-          <p className="settings-lead">
-            Any Git repository containing <span className="mono">SKILL.md</span> files.
-          </p>
-          <form className="settings-card add-registry" onSubmit={addForm.onSubmit}>
-            <div className="fields">
-              <label className="field">
-                <span className="field-label">New registry URL</span>
-                <input
-                  className="field-input"
-                  type="text"
-                  value={addForm.url}
-                  onChange={(e) => addForm.onUrlChange(e.target.value)}
-                  placeholder="https://github.com/org/repo"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </label>
-              <label className="field">
-                <span className="field-label">New registry branch</span>
-                <input
-                  className="field-input"
-                  type="text"
-                  value={addForm.branch}
-                  onChange={(e) => addForm.onBranchChange(e.target.value)}
-                  placeholder="auto-detect"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </label>
-            </div>
-            {addForm.error ? (
-              <p className="settings-error" role="alert">
-                {addForm.error}
-              </p>
-            ) : null}
-            <div className="form-actions add-actions">
-              <span className="hint">Branch is detected automatically when possible.</span>
-              <button
-                type="submit"
-                className="primary"
-                disabled={addForm.busy || !addForm.url.trim()}
-              >
-                {addForm.busy ? 'Adding…' : 'Add registry'}
-              </button>
-            </div>
-          </form>
         </section>
 
         <AgentsSection agents={agents} />

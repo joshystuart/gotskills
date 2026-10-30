@@ -1,13 +1,17 @@
+use std::path::Path;
+
 use rusqlite::{named_params, Connection, OptionalExtension, Row};
 use url::Url;
 use uuid::Uuid;
 
 use crate::db::{transaction, SyncMarkerStatus};
 use crate::error::{AppError, AppResult};
+use crate::types::RegistrySource;
 
 /// In-memory shape of a Registry row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredRegistry {
+    pub source: RegistrySource,
     pub id: String,
     pub url: String,
     pub branch: String,
@@ -21,6 +25,38 @@ pub struct StoredRegistry {
     pub removed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl StoredRegistry {
+    /// Whether the Registry should have a local folder watch.
+    pub fn is_watchable(&self) -> bool {
+        self.source == RegistrySource::Local && self.enabled && self.removed_at.is_none()
+    }
+}
+
+impl rusqlite::types::ToSql for RegistrySource {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(match self {
+            Self::Git => "git",
+            Self::Local => "local",
+        }
+        .into())
+    }
+}
+
+impl rusqlite::types::FromSql for RegistrySource {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        match value.as_str()? {
+            "git" => Ok(Self::Git),
+            "local" => Ok(Self::Local),
+            other => Err(rusqlite::types::FromSqlError::Other(Box::new(
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Unknown Registry source: {other}"),
+                ),
+            ))),
+        }
+    }
 }
 
 /// In-memory shape of a per-Registry sync marker row.
@@ -39,6 +75,7 @@ fn now() -> String {
 
 fn stored_registry(row: &Row) -> rusqlite::Result<StoredRegistry> {
     Ok(StoredRegistry {
+        source: row.get("source")?,
         id: row.get("id")?,
         url: row.get("url")?,
         branch: row.get("branch")?,
@@ -96,6 +133,7 @@ pub fn find_by_canonical_key(
 
 #[derive(Debug, Clone)]
 pub struct InsertRegistryInput {
+    pub source: RegistrySource,
     pub url: String,
     pub branch: String,
     pub enabled: bool,
@@ -115,10 +153,11 @@ pub fn insert_registry(
     transaction(conn, || -> rusqlite::Result<()> {
         conn.execute(
             "INSERT INTO registry
-               (id, url, branch, enabled, auto_update, github_owner, github_repo, canonical_key, removed_at, created_at, updated_at)
-             VALUES (:id, :url, :branch, :enabled, :auto_update, :github_owner, :github_repo, :canonical_key, NULL, :now, :now)",
+               (id, source, url, branch, enabled, auto_update, github_owner, github_repo, canonical_key, removed_at, created_at, updated_at)
+             VALUES (:id, :source, :url, :branch, :enabled, :auto_update, :github_owner, :github_repo, :canonical_key, NULL, :now, :now)",
             named_params! {
                 ":id": id,
+                ":source": input.source,
                 ":url": input.url,
                 ":branch": input.branch,
                 ":enabled": input.enabled as i64,
@@ -143,6 +182,7 @@ pub fn insert_registry(
 /// inner `Option` sets or clears the value.
 #[derive(Debug, Clone, Default)]
 pub struct UpdateRegistryFields {
+    pub source: Option<RegistrySource>,
     pub url: Option<String>,
     pub branch: Option<String>,
     pub enabled: Option<bool>,
@@ -162,6 +202,7 @@ pub fn update_registry(
     let current = get_registry(conn, id)?
         .ok_or_else(|| AppError::not_found(format!("Registry \"{id}\" not found")))?;
     let next = StoredRegistry {
+        source: fields.source.unwrap_or(current.source),
         url: fields.url.unwrap_or(current.url.clone()),
         branch: fields.branch.unwrap_or(current.branch.clone()),
         enabled: fields.enabled.unwrap_or(current.enabled),
@@ -178,12 +219,13 @@ pub fn update_registry(
     };
     conn.execute(
         "UPDATE registry SET
-           url = :url, branch = :branch, enabled = :enabled, auto_update = :auto_update,
+           source = :source, url = :url, branch = :branch, enabled = :enabled, auto_update = :auto_update,
            github_owner = :github_owner, github_repo = :github_repo,
            canonical_key = :canonical_key, colour = :colour, name = :name, updated_at = :updated_at
          WHERE id = :id",
         named_params! {
             ":id": id,
+            ":source": next.source,
             ":url": next.url,
             ":branch": next.branch,
             ":enabled": next.enabled as i64,
@@ -216,15 +258,23 @@ pub fn hard_delete_registry(conn: &Connection, id: &str) -> rusqlite::Result<()>
 }
 
 /// Registry Name: the friendly name when set, else the automatic name.
-pub fn registry_label(registry: &StoredRegistry) -> String {
+pub fn registry_label(registry: &StoredRegistry, home: &Path) -> String {
     registry
         .name
         .clone()
-        .unwrap_or_else(|| automatic_registry_name(registry))
+        .unwrap_or_else(|| automatic_registry_name(registry, home))
 }
 
-/// Automatic name: `owner/repo` for GitHub, else `host/path`.
-pub fn automatic_registry_name(registry: &StoredRegistry) -> String {
+/// Automatic name: the folder path with `home` shortened to `~` for a Local
+/// Registry, `owner/repo` for GitHub, else `host/path`.
+pub fn automatic_registry_name(registry: &StoredRegistry, home: &Path) -> String {
+    if registry.source == RegistrySource::Local {
+        let home = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+        return Path::new(&registry.url)
+            .strip_prefix(home)
+            .map(|path| format!("~/{}", path.display()))
+            .unwrap_or_else(|_| registry.url.clone());
+    }
     automatic_name(
         registry.github_owner.as_deref(),
         registry.github_repo.as_deref(),
@@ -334,6 +384,7 @@ mod tests {
 
     fn input(key: &str) -> InsertRegistryInput {
         InsertRegistryInput {
+            source: RegistrySource::Git,
             url: format!("https://github.com/o/{key}"),
             branch: "main".into(),
             enabled: true,
@@ -391,7 +442,7 @@ mod tests {
             (updated.branch.as_str(), updated.url.as_str()),
             ("dev", "https://github.com/o/a")
         );
-        assert_eq!(registry_label(&updated), "Friendly");
+        assert_eq!(registry_label(&updated, Path::new("/home")), "Friendly");
         let cleared = update_registry(
             &db,
             &r.id,
@@ -401,7 +452,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(registry_label(&cleared), "o/a");
+        assert_eq!(registry_label(&cleared, Path::new("/home")), "o/a");
         assert_eq!(
             get_registry(&db, &r.id).unwrap().unwrap().colour.as_deref(),
             Some("#aabbcc")
@@ -462,5 +513,22 @@ mod tests {
         )
         .unwrap();
         assert!(!get_marker(&db, &r.id).unwrap().unwrap().stale);
+    }
+}
+
+#[cfg(test)]
+mod migration_source_tests {
+    use super::RegistrySource;
+
+    #[test]
+    fn existing_bare_paths_remain_git() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrations::migrate_to(&conn, 11).unwrap();
+        conn.execute("INSERT INTO registry (id, url, branch, enabled, canonical_key, created_at, updated_at) VALUES ('old', '/tmp/existing', 'main', 1, 'git:/tmp/existing', 'now', 'now')", []).unwrap();
+        crate::db::migrations::migrate_to(&conn, 12).unwrap();
+        assert_eq!(
+            super::get_registry(&conn, "old").unwrap().unwrap().source,
+            RegistrySource::Git
+        );
     }
 }

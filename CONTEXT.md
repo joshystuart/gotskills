@@ -5,11 +5,15 @@ This context describes how skill sources contribute to the catalogue presented b
 ## Language
 
 **Registry**:
-A configured Git repository with one selected branch that supplies skills to the app. A GitHub owner/repository can be configured only once; changing its branch changes that registry.
+A configured source that supplies skills to the app: either a Git repository with one selected branch, or a local folder. A GitHub owner/repository or a folder can be configured only once; changing a Git registry's branch changes that registry.
 _Avoid_: Repo, source
 
+**Local Registry**:
+A registry whose source is a folder on this computer, read as it is on disk rather than through Git, so uncommitted edits are picked up. Its snapshot is a copy of the skill folders taken at each sync.
+_Avoid_: Local repo, dev folder, local source
+
 **Registry Name**:
-The name a registry is shown by across the app: a friendly name the user gives it, or, when none is given, `owner/repo` for GitHub and host/path otherwise. It is display only; a registry is identified by its id.
+The name a registry is shown by across the app: a friendly name the user gives it, or, when none is given, `owner/repo` for GitHub, the folder path with home shortened to `~` for a Local Registry, and host/path otherwise. It is display only; a registry is identified by its id.
 _Avoid_: Registry label, alias, nickname
 
 **Private Registry**:

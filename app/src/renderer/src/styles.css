@@ -1393,28 +1393,31 @@ button:disabled {
   cursor: help;
 }
 
-.add-registry {
+.edit-fields {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px;
 }
 
-.fields {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 200px;
-  gap: 12px;
+.field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.field-row .field-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-row .secondary {
+  flex: none;
+  height: 34px;
 }
 
 .field {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.field-wide {
-  grid-column: 1 / -1;
-  max-width: 360px;
 }
 
 .field-label {
@@ -1458,15 +1461,6 @@ button:disabled {
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
-}
-
-.add-actions {
-  justify-content: space-between;
-}
-
-.hint {
-  color: var(--faint);
-  font-size: 0.75rem;
 }
 
 .form-actions .primary,
@@ -1515,6 +1509,133 @@ button:disabled {
 
 .registry-item + .registry-item {
   border-top: 1px solid var(--line);
+}
+
+.add-registry-footer,
+.add-registry-row {
+  padding: 10px 16px;
+}
+
+.registry-item + .add-registry-footer,
+.registry-item + .add-registry-row {
+  border-top: 1px solid var(--line);
+}
+
+.registry-list:has(.add-menu) {
+  overflow: visible;
+}
+
+.add-menu-anchor {
+  position: relative;
+  display: inline-block;
+}
+
+.add-registry-button {
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.add-registry-button:hover {
+  text-decoration: underline;
+}
+
+.add-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  padding: 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+
+.add-menu [role='menuitem'] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.add-menu [role='menuitem']:hover,
+.add-menu [role='menuitem']:focus-visible {
+  background: var(--accent-bg);
+  outline: none;
+}
+
+.add-menu [role='menuitem'] > span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.add-registry-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--raised);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.add-registry-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.add-registry-form .field-input,
+.add-folder {
+  flex: 1;
+  min-width: 0;
+}
+
+.add-folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-registry-form .primary,
+.add-registry-form .secondary {
+  height: 34px;
+}
+
+.add-branch-toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.add-branch-toggle:hover {
+  color: var(--accent);
+}
+
+.add-branch-toggle b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.add-branch {
+  max-width: 240px;
+}
+
+.add-registry-footer .settings-error {
+  margin-top: 6px;
 }
 
 .registry-item > .switch {
@@ -1715,6 +1836,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-width: 560px;
   margin: 14px 0 0 15px;
 }
 

@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use rusqlite::Connection;
 
 use crate::db::SyncMarkerStatus;
 use crate::error::AppResult;
 use crate::registries::{
-    get_marker, list_registries, record_marker_failure, registry_label, StoredRegistry,
+    get_marker, get_registry, list_registries, record_marker_failure, registry_label,
+    StoredRegistry,
 };
 use crate::short_sha::short_sha;
 use crate::types::{
@@ -40,6 +42,7 @@ pub fn registry_sync_status_from_marker(
     let count = visible_skill_count(conn, registry_id)?;
     let Some(marker) = marker.filter(|marker| marker.status != SyncMarkerStatus::Never) else {
         return Ok(RegistrySyncStatus {
+            folder_path: None,
             registry_id: registry_id.to_string(),
             phase: SyncPhase::Synced,
             last_synced_at: None,
@@ -53,11 +56,28 @@ pub fn registry_sync_status_from_marker(
         SyncMarkerStatus::Ok | SyncMarkerStatus::Never => (SyncPhase::Synced, None),
         SyncMarkerStatus::Offline => (SyncPhase::Failed, Some(SyncFailureReason::Offline)),
         SyncMarkerStatus::Empty => (SyncPhase::Failed, Some(SyncFailureReason::Empty)),
+        SyncMarkerStatus::FolderNotFound => {
+            (SyncPhase::Failed, Some(SyncFailureReason::FolderNotFound))
+        }
+        SyncMarkerStatus::FolderUnreadable => {
+            (SyncPhase::Failed, Some(SyncFailureReason::FolderUnreadable))
+        }
+        SyncMarkerStatus::FolderChanged => {
+            (SyncPhase::Failed, Some(SyncFailureReason::FolderChanged))
+        }
+        SyncMarkerStatus::SnapshotFailed => {
+            (SyncPhase::Failed, Some(SyncFailureReason::SnapshotFailed))
+        }
         SyncMarkerStatus::AccessRequired => {
             (SyncPhase::Failed, Some(SyncFailureReason::AccessRequired))
         }
     };
     Ok(RegistrySyncStatus {
+        folder_path: if reason.is_some_and(SyncFailureReason::is_local) {
+            get_registry(conn, registry_id)?.map(|registry| registry.url)
+        } else {
+            None
+        },
         registry_id: registry_id.to_string(),
         phase,
         last_synced_at: marker.last_sync_at,
@@ -176,6 +196,7 @@ pub fn read_catalogue(
     conn: &Connection,
     report: &ReconcileReport,
     install_records: &[InstallRecord],
+    home: &Path,
 ) -> AppResult<CatalogueSnapshot> {
     let registries = list_registries(conn, true)?;
     let by_id: HashMap<&str, &StoredRegistry> = registries
@@ -289,7 +310,7 @@ pub fn read_catalogue(
                     id: skill_id(&row.registry_id, &row.folder_name),
                     registry_label: by_id
                         .get(row.registry_id.as_str())
-                        .map(|registry| registry_label(registry))
+                        .map(|registry| registry_label(registry, home))
                         .unwrap_or_else(|| row.registry_id.clone()),
                     conflict,
                     stale: marker_stale
@@ -337,10 +358,11 @@ mod tests {
         insert_registry, soft_remove_registry, update_registry, upsert_marker_success,
         InsertRegistryInput, UpdateRegistryFields,
     };
-    use crate::types::{InstallMethod, ReconcileState};
+    use crate::types::{InstallMethod, ReconcileState, RegistrySource};
 
     fn ok(id: &str, at: &str, revision: &str) -> RegistrySyncStatus {
         RegistrySyncStatus {
+            folder_path: None,
             registry_id: id.into(),
             phase: SyncPhase::Synced,
             last_synced_at: Some(at.into()),
@@ -353,6 +375,7 @@ mod tests {
 
     fn failed(id: &str, reason: SyncFailureReason) -> RegistrySyncStatus {
         RegistrySyncStatus {
+            folder_path: None,
             registry_id: id.into(),
             phase: SyncPhase::Failed,
             last_synced_at: None,
@@ -390,6 +413,7 @@ mod tests {
     #[test]
     fn aggregate_is_syncing_when_any_registry_is_syncing() {
         let syncing = RegistrySyncStatus {
+            folder_path: None,
             registry_id: "b".into(),
             phase: SyncPhase::Syncing,
             last_synced_at: None,
@@ -434,6 +458,7 @@ mod tests {
         insert_registry(
             conn,
             &InsertRegistryInput {
+                source: RegistrySource::Git,
                 url: format!("https://github.com/o/{key}"),
                 branch: "main".into(),
                 enabled: true,
@@ -549,7 +574,7 @@ mod tests {
             SyncMarkerStatus::Ok,
         )
         .unwrap();
-        let snapshot = read_catalogue(&conn, &empty_report(), &[]).unwrap();
+        let snapshot = read_catalogue(&conn, &empty_report(), &[], Path::new("/home")).unwrap();
         assert_eq!(snapshot.skills.len(), 1);
         let alpha = &snapshot.skills[0];
         assert_eq!(alpha.id, format!("{id}/alpha"));
@@ -567,7 +592,7 @@ mod tests {
         skill(&conn, &a, "shared", 0);
         skill(&conn, &b, "shared", 0);
         skill(&conn, &b, "solo", 0);
-        let snapshot = read_catalogue(&conn, &empty_report(), &[]).unwrap();
+        let snapshot = read_catalogue(&conn, &empty_report(), &[], Path::new("/home")).unwrap();
         let conflicts: Vec<_> = snapshot
             .skills
             .iter()
@@ -602,7 +627,8 @@ mod tests {
             record(&b, "off-installed", "claude-code"),
         ];
 
-        let snapshot = read_catalogue(&conn, &empty_report(), &records).unwrap();
+        let snapshot =
+            read_catalogue(&conn, &empty_report(), &records, Path::new("/home")).unwrap();
         let mut folders: Vec<_> = snapshot
             .skills
             .iter()
@@ -631,7 +657,8 @@ mod tests {
         soft_remove_registry(&conn, &a).unwrap();
         let records = vec![record(&a, "kept", "claude-code")];
 
-        let snapshot = read_catalogue(&conn, &empty_report(), &records).unwrap();
+        let snapshot =
+            read_catalogue(&conn, &empty_report(), &records, Path::new("/home")).unwrap();
         assert_eq!(snapshot.skills.len(), 1);
         assert_eq!(snapshot.skills[0].folder_name, "kept");
         assert!(snapshot.skills[0].orphaned);
@@ -646,7 +673,7 @@ mod tests {
         let records = vec![record(&a, "alpha", "claude-code")];
         let reconcile = report(&a, "alpha", "claude-code", ReconcileState::UpdateAvailable);
 
-        let snapshot = read_catalogue(&conn, &reconcile, &records).unwrap();
+        let snapshot = read_catalogue(&conn, &reconcile, &records, Path::new("/home")).unwrap();
         assert_eq!(
             snapshot.skills[0].per_target,
             vec![PerTargetState {

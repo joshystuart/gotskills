@@ -3,16 +3,23 @@ use std::sync::OnceLock;
 use url::Url;
 
 use crate::error::AppError;
+use crate::types::RegistrySource;
 
 /// A validated, canonicalised Registry Git URL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalRegistry {
+    pub source: RegistrySource,
     pub url: String,
     pub canonical_key: String,
     pub github_owner: Option<String>,
     pub github_repo: Option<String>,
     pub label: String,
     pub is_github: bool,
+}
+
+pub fn is_local_path(input: &str) -> bool {
+    let input = input.trim();
+    input.starts_with('/') || input.starts_with("~/") || input == "~"
 }
 
 fn invalid(message: &str) -> AppError {
@@ -56,6 +63,7 @@ fn to_owner_repo(pathname: &str) -> Option<(String, String)> {
 
 fn github_result(owner: String, repo: String, url: &str) -> CanonicalRegistry {
     CanonicalRegistry {
+        source: RegistrySource::Git,
         url: url.to_string(),
         canonical_key: format!("github:{}/{}", owner.to_lowercase(), repo.to_lowercase()),
         label: format!("{owner}/{repo}"),
@@ -67,6 +75,7 @@ fn github_result(owner: String, repo: String, url: &str) -> CanonicalRegistry {
 
 fn generic_result(url: &str, body: &str, label: String) -> CanonicalRegistry {
     CanonicalRegistry {
+        source: RegistrySource::Git,
         url: url.to_string(),
         canonical_key: format!("git:{body}"),
         github_owner: None,
@@ -86,6 +95,13 @@ pub fn canonicalize_registry_url(input: &str) -> Result<CanonicalRegistry, AppEr
     let url = input.trim();
     if url.is_empty() {
         return Err(invalid("Registry URL is required"));
+    }
+
+    if is_local_path(url) {
+        let mut result = generic_result(url, url, url.to_string());
+        result.source = RegistrySource::Local;
+        result.canonical_key = format!("local:{url}");
+        return Ok(result);
     }
 
     if let Some(captures) = scp_like().captures(url) {
@@ -242,6 +258,6 @@ mod tests {
         let result = canonicalize_registry_url("/tmp/local-registry").unwrap();
         assert!(!result.is_github);
         assert_eq!(result.url, "/tmp/local-registry");
-        assert_eq!(result.canonical_key, "git:/tmp/local-registry");
+        assert_eq!(result.canonical_key, "local:/tmp/local-registry");
     }
 }

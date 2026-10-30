@@ -134,10 +134,12 @@ pub fn github_url(registry: &RegistryRecord) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{RegistrySyncStatus, SyncPhase};
+    use crate::types::{RegistrySource, RegistrySyncStatus, SyncPhase};
 
     fn registry(owner: Option<&str>, repo: Option<&str>) -> RegistryRecord {
         RegistryRecord {
+            source: RegistrySource::Git,
+            automatic_name: "o/r".into(),
             id: "r1".into(),
             url: "https://example.test/r1".into(),
             branch: "main".into(),
@@ -148,6 +150,7 @@ mod tests {
             colour: None,
             name: None,
             sync_status: RegistrySyncStatus {
+                folder_path: None,
                 registry_id: "r1".into(),
                 phase: SyncPhase::Synced,
                 last_synced_at: None,

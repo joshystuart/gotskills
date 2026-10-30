@@ -9,6 +9,10 @@ pub enum SyncMarkerStatus {
     Offline,
     Empty,
     AccessRequired,
+    FolderNotFound,
+    FolderUnreadable,
+    FolderChanged,
+    SnapshotFailed,
 }
 
 impl SyncMarkerStatus {
@@ -20,6 +24,10 @@ impl SyncMarkerStatus {
             SyncMarkerStatus::Offline => "offline",
             SyncMarkerStatus::Empty => "empty",
             SyncMarkerStatus::AccessRequired => "access_required",
+            SyncMarkerStatus::FolderNotFound => "folder_not_found",
+            SyncMarkerStatus::FolderUnreadable => "folder_unreadable",
+            SyncMarkerStatus::FolderChanged => "folder_changed",
+            SyncMarkerStatus::SnapshotFailed => "snapshot_failed",
         }
     }
 
@@ -31,6 +39,10 @@ impl SyncMarkerStatus {
             "offline" => Ok(SyncMarkerStatus::Offline),
             "empty" => Ok(SyncMarkerStatus::Empty),
             "access_required" => Ok(SyncMarkerStatus::AccessRequired),
+            "folder_not_found" => Ok(SyncMarkerStatus::FolderNotFound),
+            "folder_unreadable" => Ok(SyncMarkerStatus::FolderUnreadable),
+            "folder_changed" => Ok(SyncMarkerStatus::FolderChanged),
+            "snapshot_failed" => Ok(SyncMarkerStatus::SnapshotFailed),
             other => Err(UnknownSyncMarkerStatus(other.to_string())),
         }
     }
@@ -68,6 +80,10 @@ mod tests {
             SyncMarkerStatus::Ok,
             SyncMarkerStatus::Offline,
             SyncMarkerStatus::Empty,
+            SyncMarkerStatus::FolderNotFound,
+            SyncMarkerStatus::FolderUnreadable,
+            SyncMarkerStatus::FolderChanged,
+            SyncMarkerStatus::SnapshotFailed,
         ] {
             assert_eq!(SyncMarkerStatus::decode(status.encode()), Ok(status));
         }

@@ -88,3 +88,12 @@ describe('canonicalizeRegistryUrl', () => {
     })
   })
 })
+
+describe('registry source classification', () => {
+  it.each(['/tmp/skills', '~/skills'])('classifies %s as local', (path) => {
+    expect(canonicalizeRegistryUrl(path).source).toBe('local')
+  })
+  it.each(['file:///tmp/skills', 'https://github.com/owner/skills'])('keeps %s as git', (url) => {
+    expect(canonicalizeRegistryUrl(url).source).toBe('git')
+  })
+})

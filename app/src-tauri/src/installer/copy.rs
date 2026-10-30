@@ -10,7 +10,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-const EXCLUDED_FILES: [&str; 1] = ["metadata.json"];
+const EXCLUDED_FILES: [&str; 2] = ["metadata.json", ".DS_Store"];
 const EXCLUDED_DIRS: [&str; 3] = [".git", "__pycache__", "__pypackages__"];
 
 fn is_excluded(name: &str, is_dir: bool) -> bool {
@@ -24,19 +24,22 @@ pub fn copy_tree(src: &Path, dest: &Path, filter: bool) -> io::Result<()> {
         let entry = entry?;
         let name = entry.file_name();
         let name_text = name.to_string_lossy();
-        let is_dir = entry.file_type()?.is_dir();
-        if filter && is_excluded(&name_text, is_dir) {
-            continue;
-        }
         let from = entry.path();
         let to = dest.join(&name);
-        let Ok(metadata) = fs::metadata(&from) else {
-            continue;
+        let metadata = match fs::metadata(&from) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
         };
+        if filter && is_excluded(&name_text, metadata.is_dir()) {
+            continue;
+        }
         if metadata.is_dir() {
             copy_tree(&from, &to, filter)?;
         } else {
             fs::copy(&from, &to)?;
+            fs::File::open(&to)?
+                .set_times(fs::FileTimes::new().set_modified(metadata.modified()?))?;
         }
     }
     Ok(())

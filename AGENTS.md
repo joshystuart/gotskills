@@ -18,7 +18,7 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 ## Checks
 
-Run `npm run check` from the repository root before handing back work.
+Run `npm run check` from the repository root before handing work back to the user. Subagents working on part of a larger task run only the checks that cover their change; whoever hands the finished work back runs the full check once.
 
 ## Commits
 

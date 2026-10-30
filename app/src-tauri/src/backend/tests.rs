@@ -1,3 +1,4 @@
+use crate::types::RegistrySource;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -90,7 +91,7 @@ fn remote(ids: &[&str]) -> tempfile::TempDir {
 fn add(backend: &Backend, remote: &Path) -> RegistryRecord {
     backend
         .add_registry(&AddRegistryRequest {
-            url: remote.to_string_lossy().into_owned(),
+            url: format!("file://{}", remote.display()),
             branch: Some("main".into()),
             enabled: None,
         })
@@ -921,9 +922,7 @@ fn refresh_respects_concurrency_and_uses_the_next_setting() {
                 std::thread::sleep(Duration::from_millis(30));
                 active.fetch_sub(1, Ordering::SeqCst);
             }
-            Err(GitError {
-                message: "offline".into(),
-            })
+            Err(GitError::new("offline"))
         })
     };
     let h = harness_with(Some(sync));
@@ -1033,4 +1032,603 @@ fn changing_concurrency_does_not_interrupt_the_current_refresh() {
         assert!(pending.iter().all(Result::is_ok));
     });
     assert_eq!(h.backend.get_sync_concurrency(), 1);
+}
+
+#[test]
+fn local_registry_snapshots_without_git() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    let (registry, calls) = crate::mirror::git_exec::count_git_invocations(|| {
+        h.backend
+            .add_registry(&AddRegistryRequest {
+                url: "~/drafts".into(),
+                branch: None,
+                enabled: None,
+            })
+            .unwrap()
+    });
+    assert_eq!(calls, 0);
+    assert_eq!(registry.source, RegistrySource::Local);
+    assert_eq!(registry.branch, "");
+    assert_eq!(folders(&h.backend), vec!["alpha"]);
+}
+
+#[test]
+fn local_installs_use_pinned_snapshots_and_auto_update_changed_content() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: First"));
+    fs::write(folder.join("alpha/helper.txt"), "first").unwrap();
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: "~/drafts".into(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let request = install_request(&registry, "alpha", &["~/.agents/skills"]);
+    fs::write(folder.join("alpha/helper.txt"), "second").unwrap();
+    let (_, calls) =
+        crate::mirror::git_exec::count_git_invocations(|| h.backend.install(&request).unwrap());
+    assert_eq!(calls, 0);
+    assert_eq!(
+        fs::read_to_string(h.home.path().join(".agents/skills/alpha/helper.txt")).unwrap(),
+        "first"
+    );
+    let mut change = update(&registry.id);
+    change.auto_update = Some(true);
+    h.backend.update_registry(&change).unwrap();
+    assert_eq!(
+        fs::read_to_string(h.home.path().join(".agents/skills/alpha/helper.txt")).unwrap(),
+        "second"
+    );
+    assert!(h.backend.install(&request).is_err());
+}
+
+#[test]
+fn local_identity_and_folder_guards_use_real_paths() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    let add_path = |url: String| {
+        h.backend.add_registry(&AddRegistryRequest {
+            url,
+            branch: None,
+            enabled: Some(false),
+        })
+    };
+    let registry = add_path("~/drafts".into()).unwrap();
+    assert_eq!(registry.automatic_name, "~/drafts");
+    let link = h.home.path().join("alias");
+    std::os::unix::fs::symlink(&folder, &link).unwrap();
+    assert!(add_path(link.to_string_lossy().into_owned())
+        .unwrap_err()
+        .to_string()
+        .contains("already configured"));
+    for path in [
+        "~".to_string(),
+        "/".into(),
+        h.data.path().to_string_lossy().into_owned(),
+        h.data
+            .path()
+            .parent()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+    ] {
+        assert!(add_path(path)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be"));
+    }
+}
+
+#[test]
+fn local_content_changes_offer_updates_and_conflict_with_git_skills() {
+    let h = harness();
+    without_default(&h.backend);
+    let git_source = remote(&["alpha"]);
+    add(&h.backend, git_source.path());
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: "~/drafts".into(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let skills = h.backend.get_catalogue().unwrap().skills;
+    assert_eq!(skills.len(), 2);
+    assert!(skills.iter().all(|skill| skill.conflict));
+    assert!(skills
+        .iter()
+        .any(|skill| skill.registry_label == "~/drafts"));
+    h.backend
+        .install(&install_request(&registry, "alpha", &["~/.agents/skills"]))
+        .unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Changed"));
+    let (_, calls) = crate::mirror::git_exec::count_git_invocations(|| {
+        h.backend.sync_registry(&registry.id).unwrap()
+    });
+    assert_eq!(calls, 0);
+    let report = h
+        .backend
+        .reconcile(Some(&registry.id), Some("alpha"))
+        .unwrap();
+    assert!(report
+        .entries
+        .iter()
+        .any(|entry| entry.state == ReconcileState::UpdateAvailable));
+}
+
+#[test]
+fn registry_switches_between_git_and_local_preserving_settings() {
+    let h = harness();
+    without_default(&h.backend);
+    let remote = remote(&["published"]);
+    let registry = add(&h.backend, remote.path());
+    let mut settings = update(&registry.id);
+    settings.name = Some("My skills".into());
+    settings.colour = Some("#123456".into());
+    settings.auto_update = Some(true);
+    h.backend.update_registry(&settings).unwrap();
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "draft", Some("name: draft\ndescription: Draft"));
+    let mut change = update(&registry.id);
+    change.url = Some("~/drafts".into());
+    change.branch = Some("ignored-for-local".into());
+    let local = h.backend.update_registry(&change).unwrap();
+    assert_eq!(local.source, RegistrySource::Local);
+    assert_eq!(local.branch, "");
+    assert_eq!(folders(&h.backend), vec!["draft"]);
+    assert_eq!(local.id, registry.id);
+    assert_eq!(local.name.as_deref(), Some("My skills"));
+    assert_eq!(local.colour.as_deref(), Some("#123456"));
+    assert!(local.auto_update);
+    change.url = Some(format!("file://{}", remote.path().display()));
+    change.branch = None;
+    let git = h.backend.update_registry(&change).unwrap();
+    assert_eq!(git.source, RegistrySource::Git);
+    assert_eq!(git.branch, "main");
+    assert_eq!(folders(&h.backend), vec!["published"]);
+    assert_eq!(git.id, registry.id);
+    assert_eq!(git.name, local.name);
+    assert_eq!(git.colour, local.colour);
+    assert!(git.auto_update);
+}
+
+#[test]
+fn registry_source_switch_rejects_duplicates_and_unsafe_folders_without_changes() {
+    let h = harness();
+    without_default(&h.backend);
+    let source = remote(&["published"]);
+    let registry = add(&h.backend, source.path());
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    let local = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: "~/drafts".into(),
+            branch: None,
+            enabled: Some(false),
+        })
+        .unwrap();
+    let alias = h.home.path().join("alias");
+    std::os::unix::fs::symlink(&folder, &alias).unwrap();
+    let mut change = update(&registry.id);
+    change.url = Some(alias.to_string_lossy().into_owned());
+    assert!(h
+        .backend
+        .update_registry(&change)
+        .unwrap_err()
+        .to_string()
+        .contains("already configured"));
+    for path in [
+        "~".to_string(),
+        "/".into(),
+        h.data.path().to_string_lossy().into_owned(),
+        h.data
+            .path()
+            .parent()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+    ] {
+        change.url = Some(path);
+        assert!(h
+            .backend
+            .update_registry(&change)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be"));
+    }
+    let unchanged = h.backend.registry(&registry.id).unwrap();
+    assert_eq!(unchanged.source, RegistrySource::Git);
+    assert_eq!(unchanged.url, registry.url);
+    assert_eq!(unchanged.branch, registry.branch);
+    assert_eq!(folders(&h.backend), vec!["published"]);
+    let mut change = update(&local.id);
+    change.url = Some(registry.url);
+    assert!(h
+        .backend
+        .update_registry(&change)
+        .unwrap_err()
+        .to_string()
+        .contains("already configured"));
+    assert_eq!(
+        h.backend.registry(&local.id).unwrap().source,
+        RegistrySource::Local
+    );
+}
+
+#[test]
+fn local_registry_switch_uses_the_requested_git_branch() {
+    let h = harness();
+    without_default(&h.backend);
+    let source = remote(&["published"]);
+    run_git(source.path(), &["checkout", "-b", "draft"]);
+    write_skill(
+        source.path(),
+        "skills/preview",
+        Some("name: preview\ndescription: Preview"),
+    );
+    commit_all(source.path(), "preview");
+    run_git(source.path(), &["checkout", "main"]);
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: source.path().to_string_lossy().into_owned(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let mut change = update(&registry.id);
+    change.url = Some(format!("file://{}", source.path().display()));
+    change.branch = Some("draft".into());
+    let registry = h.backend.update_registry(&change).unwrap();
+    assert_eq!(registry.source, RegistrySource::Git);
+    assert_eq!(registry.branch, "draft");
+    assert_eq!(folders(&h.backend), vec!["preview", "published"]);
+}
+
+#[test]
+fn missing_local_folder_keeps_snapshot_and_recovers() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: "~/drafts".into(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let saved = h.home.path().join("saved-drafts");
+    fs::rename(&folder, &saved).unwrap();
+    let status = h.backend.sync_registry(&registry.id).unwrap();
+    assert_eq!(
+        serde_json::to_value(&status).unwrap()["reason"],
+        "folder-not-found"
+    );
+    assert_eq!(
+        serde_json::to_value(&status).unwrap()["folderPath"],
+        registry.url
+    );
+    assert_eq!(status.stale, Some(true));
+    assert_eq!(status.revision, registry.sync_status.revision);
+    assert_eq!(folders(&h.backend), vec!["alpha"]);
+    assert!(h.backend.get_catalogue().unwrap().skills[0].stale);
+    let mut request = install_request(&registry, "alpha", &["~/.agents/skills"]);
+    request.acknowledge_stale = Some(true);
+    h.backend.install(&request).unwrap();
+    fs::rename(&saved, &folder).unwrap();
+    let recovered = h.backend.sync_registry(&registry.id).unwrap();
+    assert_eq!(recovered.phase, SyncPhase::Synced);
+    assert_eq!(recovered.stale, Some(false));
+    assert_eq!(recovered.reason, None);
+    assert_eq!(recovered.folder_path, None);
+    assert!(!h.backend.get_catalogue().unwrap().skills[0].stale);
+}
+
+#[test]
+fn unreadable_nested_local_skill_keeps_catalogue_stale_until_recovery() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(
+        &folder,
+        "skills/alpha",
+        Some("name: alpha\ndescription: Draft"),
+    );
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: "~/drafts".into(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    for path in [
+        folder.join("skills/alpha"),
+        folder.join("skills/alpha/SKILL.md"),
+    ] {
+        let permissions = fs::metadata(&path).unwrap().permissions();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = h.backend.sync_registry(&registry.id);
+        fs::set_permissions(&path, permissions).unwrap();
+        let status = result.unwrap();
+        assert_eq!(
+            serde_json::to_value(&status).unwrap()["reason"],
+            "folder-unreadable"
+        );
+        assert_eq!(status.folder_path.as_deref(), Some(registry.url.as_str()));
+        assert_eq!(status.stale, Some(true));
+        assert_eq!(status.revision, registry.sync_status.revision);
+        assert_eq!(folders(&h.backend), vec!["alpha"]);
+        assert!(h.backend.get_catalogue().unwrap().skills[0].stale);
+        let recovered = h.backend.sync_registry(&registry.id).unwrap();
+        assert_eq!(recovered.stale, Some(false));
+    }
+}
+
+#[test]
+fn watched_local_edits_refresh_catalogue_within_five_seconds() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    h.backend
+        .add_registry(&AddRegistryRequest {
+            url: folder.to_string_lossy().into_owned(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let before = h.backend.get_catalogue().unwrap().skills[0]
+        .latest_version
+        .clone();
+    fs::write(folder.join("alpha/notes.txt"), "saved edit").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let after = h.backend.get_catalogue().unwrap().skills[0]
+            .latest_version
+            .clone();
+        if after != before {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "watcher did not refresh the catalogue"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[track_caller]
+fn wait_for_local_revision(backend: &Backend, id: &str, before: &Option<String>) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while backend.registry(id).unwrap().sync_status.revision == *before {
+        assert!(
+            Instant::now() < deadline,
+            "watcher did not sync edited content"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[test]
+fn local_watches_stop_when_disabled_or_removed_and_restart_when_enabled() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: folder.to_string_lossy().into_owned(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let mut request = update(&registry.id);
+    request.enabled = Some(false);
+    h.backend.update_registry(&request).unwrap();
+    let before = current(&h.backend, &registry.id).sync_status.revision;
+    fs::write(folder.join("alpha/notes.txt"), "disabled edit").unwrap();
+    std::thread::sleep(Duration::from_millis(2200));
+    assert_eq!(
+        current(&h.backend, &registry.id).sync_status.revision,
+        before
+    );
+    request.enabled = Some(true);
+    h.backend.update_registry(&request).unwrap();
+    let before = current(&h.backend, &registry.id).sync_status.revision;
+    fs::write(folder.join("alpha/notes.txt"), "enabled edit").unwrap();
+    wait_for_local_revision(&h.backend, &registry.id, &before);
+    h.backend.remove_registry(&registry.id).unwrap();
+    let before = *h.events.catalogue_updates.lock().unwrap();
+    fs::write(folder.join("alpha/notes.txt"), "removed edit").unwrap();
+    std::thread::sleep(Duration::from_millis(2200));
+    assert_eq!(*h.events.catalogue_updates.lock().unwrap(), before);
+}
+
+#[test]
+fn local_watches_start_at_launch_and_follow_changed_paths() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    let other = h.home.path().join("other");
+    fs::create_dir_all(&folder).unwrap();
+    fs::create_dir_all(&other).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    write_skill(&other, "alpha", Some("name: alpha\ndescription: Other"));
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: folder.to_string_lossy().into_owned(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    drop(h.backend);
+    let backend = open_with(h.data.path(), h.home.path(), h.events, None);
+    let before = current(&backend, &registry.id).sync_status.revision;
+    fs::write(folder.join("alpha/notes.txt"), "startup edit").unwrap();
+    wait_for_local_revision(&backend, &registry.id, &before);
+    let mut request = update(&registry.id);
+    request.url = Some(other.to_string_lossy().into_owned());
+    backend.update_registry(&request).unwrap();
+    let before = current(&backend, &registry.id).sync_status.revision;
+    fs::write(folder.join("alpha/notes.txt"), "old path edit").unwrap();
+    std::thread::sleep(Duration::from_millis(2200));
+    assert_eq!(current(&backend, &registry.id).sync_status.revision, before);
+    fs::write(other.join("alpha/notes.txt"), "new path edit").unwrap();
+    wait_for_local_revision(&backend, &registry.id, &before);
+}
+
+#[test]
+fn failed_watch_setup_keeps_manual_and_interval_sync_available() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    let moved = h.home.path().join("moved");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: folder.to_string_lossy().into_owned(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    drop(h.backend);
+    fs::rename(&folder, &moved).unwrap();
+    let backend = open_with(h.data.path(), h.home.path(), h.events, None);
+    fs::rename(&moved, &folder).unwrap();
+    fs::write(folder.join("alpha/notes.txt"), "manual edit").unwrap();
+    backend.sync_registry(&registry.id).unwrap();
+    let before = current(&backend, &registry.id).sync_status.revision;
+    fs::write(folder.join("alpha/notes.txt"), "interval edit").unwrap();
+    backend.sync_now().unwrap();
+    assert_ne!(current(&backend, &registry.id).sync_status.revision, before);
+}
+
+#[test]
+fn watched_edit_during_manual_sync_runs_a_fresh_sync_after_it() {
+    watch_during_manual_sync(false);
+}
+
+#[test]
+fn disabling_a_registry_cancels_a_watch_sync_queued_behind_manual_sync() {
+    watch_during_manual_sync(true);
+}
+
+fn watch_during_manual_sync(disable: bool) {
+    let pause = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (started, wait_started) = std::sync::mpsc::channel();
+    let (release, wait_release) = std::sync::mpsc::channel();
+    let wait_release = Mutex::new(wait_release);
+    let paused = pause.clone();
+    let sync: SyncFn = Arc::new(move |conn, config| {
+        let result = sync_registry(conn, config);
+        if paused.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            started.send(()).unwrap();
+            wait_release.lock().unwrap().recv().unwrap();
+        }
+        result
+    });
+    let h = harness_with(Some(sync));
+    without_default(&h.backend);
+    let folder = h.home.path().join("drafts");
+    fs::create_dir_all(&folder).unwrap();
+    write_skill(&folder, "alpha", Some("name: alpha\ndescription: Draft"));
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: folder.to_string_lossy().into_owned(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let before = registry.sync_status.revision;
+    pause.store(true, std::sync::atomic::Ordering::SeqCst);
+    let backend = Arc::new(h.backend);
+    let sync_backend = backend.clone();
+    let id = registry.id.clone();
+    let manual = std::thread::spawn(move || sync_backend.sync_registry(&id).unwrap());
+    wait_started.recv_timeout(Duration::from_secs(5)).unwrap();
+    fs::write(folder.join("alpha/notes.txt"), "edit after manual snapshot").unwrap();
+    std::thread::sleep(Duration::from_millis(2200));
+    if disable {
+        let mut request = update(&registry.id);
+        request.enabled = Some(false);
+        backend.update_registry(&request).unwrap();
+    }
+    release.send(()).unwrap();
+    manual.join().unwrap();
+    if disable {
+        std::thread::sleep(Duration::from_millis(1500));
+        assert_eq!(current(&backend, &registry.id).sync_status.revision, before);
+    } else {
+        wait_for_local_revision(&backend, &registry.id, &before);
+    }
+}
+
+#[test]
+fn git_registry_folders_are_not_watched() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = remote(&["alpha"]);
+    add(&h.backend, folder.path());
+    let before = *h.events.catalogue_updates.lock().unwrap();
+    fs::write(folder.path().join("notes.txt"), "working tree edit").unwrap();
+    std::thread::sleep(Duration::from_millis(2200));
+    assert_eq!(*h.events.catalogue_updates.lock().unwrap(), before);
+}
+
+#[test]
+fn switching_between_local_and_git_stops_and_restarts_the_watch() {
+    let h = harness();
+    without_default(&h.backend);
+    let folder = remote(&["alpha"]);
+    let registry = h
+        .backend
+        .add_registry(&AddRegistryRequest {
+            url: folder.path().to_string_lossy().into_owned(),
+            branch: None,
+            enabled: None,
+        })
+        .unwrap();
+    let mut request = update(&registry.id);
+    request.url = Some(format!("file://{}", folder.path().display()));
+    request.branch = Some("main".into());
+    h.backend.update_registry(&request).unwrap();
+    let before = *h.events.catalogue_updates.lock().unwrap();
+    fs::write(folder.path().join("skills/alpha/notes.txt"), "git edit").unwrap();
+    std::thread::sleep(Duration::from_millis(2200));
+    assert_eq!(*h.events.catalogue_updates.lock().unwrap(), before);
+    request.url = Some(folder.path().to_string_lossy().into_owned());
+    h.backend.update_registry(&request).unwrap();
+    let before = current(&h.backend, &registry.id).sync_status.revision;
+    fs::write(folder.path().join("skills/alpha/notes.txt"), "local edit").unwrap();
+    wait_for_local_revision(&h.backend, &registry.id, &before);
 }

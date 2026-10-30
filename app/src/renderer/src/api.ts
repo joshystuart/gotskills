@@ -64,6 +64,7 @@ function subscribe<T>(event: string, cb: (payload: T) => void): Unsubscribe {
 }
 
 const api: RendererApi = {
+  chooseRegistryFolder: () => call('chooseRegistryFolder'),
   getSyncConcurrency: () => call('getSyncConcurrency'),
   setSyncConcurrency: (concurrency) => call('setSyncConcurrency', { concurrency }),
   checkAppUpdate: () => call('checkAppUpdate'),
