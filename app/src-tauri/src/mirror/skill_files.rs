@@ -1,5 +1,3 @@
-#[cfg(test)]
-use crate::types::RegistrySource;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -336,6 +334,7 @@ mod tests {
     use super::*;
     use crate::db::open_database;
     use crate::registries::{insert_registry, InsertRegistryInput};
+    use crate::types::RegistrySource;
     use std::os::unix::fs::symlink;
 
     struct Fixture {

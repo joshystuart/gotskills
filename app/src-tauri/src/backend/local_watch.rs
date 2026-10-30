@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Weak};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
@@ -107,15 +107,13 @@ impl Backend {
 
     fn sync_watched_registry(&self, id: &str) {
         let registry = get_registry(&self.db(), id).ok().flatten();
-        if let Some(registry) = registry.filter(|registry| registry.is_watchable()) {
-            let _ = self.do_sync_pending(&registry, true);
+        if registry.is_some_and(|registry| registry.is_watchable()) {
+            let _ = self.sync_after_change(id);
             self.events.catalogue_updated();
             self.emit_status();
         }
     }
 }
-
-use std::time::Duration;
 
 #[derive(Default)]
 struct Debounce {

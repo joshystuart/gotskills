@@ -1,7 +1,5 @@
 //! The sidebar registry menu: items for a registry and how a pick is handled.
 
-#[cfg(test)]
-use crate::types::RegistrySource;
 use crate::types::{RegistryMenuAction, RegistryRecord};
 
 /// Every action the menu offers, including those the backend handles itself.
@@ -136,7 +134,7 @@ pub fn github_url(registry: &RegistryRecord) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{RegistrySyncStatus, SyncPhase};
+    use crate::types::{RegistrySource, RegistrySyncStatus, SyncPhase};
 
     fn registry(owner: Option<&str>, repo: Option<&str>) -> RegistryRecord {
         RegistryRecord {

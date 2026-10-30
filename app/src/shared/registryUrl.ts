@@ -1,3 +1,5 @@
+import type { RegistrySource } from './ipc'
+
 export class RegistryUrlError extends Error {
   readonly code = 'registry-url-invalid' as const
   constructor(message: string) {
@@ -9,7 +11,7 @@ export class RegistryUrlError extends Error {
 export interface CanonicalRegistry {
   /** Normalized URL safe to persist and clone (credentials already rejected). */
   url: string
-  source: 'git' | 'local'
+  source: RegistrySource
   /** Unique dedup key: `github:owner/repo` (lowercased) or `git:<normalized>`. */
   canonicalKey: string
   githubOwner: string | null

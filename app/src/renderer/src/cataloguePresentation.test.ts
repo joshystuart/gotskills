@@ -119,6 +119,8 @@ describe('filterByRegistry', () => {
 
 describe('registryRecordLabel', () => {
   const github = {
+    source: 'git' as const,
+    automaticName: 'anthropics/skills',
     githubOwner: 'anthropics',
     githubRepo: 'skills',
     url: 'https://github.com/anthropics/skills',
@@ -135,6 +137,8 @@ describe('registryRecordLabel', () => {
   it('falls back to host and path for a non-GitHub Registry without a name', () => {
     expect(
       registryRecordLabel({
+        source: 'git',
+        automaticName: 'git.example.com/team/skills',
         githubOwner: null,
         githubRepo: null,
         url: 'https://git.example.com/team/skills/',
@@ -376,4 +380,16 @@ it('names missing folders in registry status and full or partial catalogue banne
     expect(banner).toContain('Folder not found: /skills/drafts')
     expect(banner).not.toContain('system Git')
   }
+})
+
+it.each([
+  ['folder-unreadable', "Folder can't be read: /skills/drafts"],
+  ['folder-changed', 'Folder changed during sync: /skills/drafts'],
+  ['snapshot-failed', "Couldn't save a snapshot of the folder: /skills/drafts"],
+] as const)('names the folder for a %s failure', (reason, label) => {
+  const failed = regStatus({ phase: 'failed', reason, folderPath: '/skills/drafts' })
+  expect(registryStatusLabel(failed).text).toBe(label)
+  expect(bannerMessage(syncStatus({ phase: 'failed', reason, registries: [failed] }))).toContain(
+    label
+  )
 })

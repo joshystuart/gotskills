@@ -313,9 +313,9 @@ impl Discovery<'_> {
         found
     }
 
-    fn finish(self) -> Result<Vec<Skill>, String> {
+    fn finish(self) -> std::io::Result<Vec<Skill>> {
         match self.io_error {
-            Some(error) => Err(error.to_string()),
+            Some(error) => Err(error),
             None => Ok(self.skills),
         }
     }
@@ -421,12 +421,12 @@ pub fn discover_skills(
     base_path: &Path,
     subpath: Option<&str>,
     options: DiscoverSkillsOptions,
-) -> Result<Vec<Skill>, String> {
+) -> std::io::Result<Vec<Skill>> {
     if let Some(subpath) = subpath.filter(|value| !value.is_empty()) {
         if !is_subpath_safe(base_path, subpath) {
-            return Err(format!(
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!(
                 "Invalid subpath: \"{subpath}\" resolves outside the repository directory. Subpath must not contain \"..\" segments that escape the base path."
-            ));
+            )));
         }
     }
     let search_path = match subpath.filter(|value| !value.is_empty()) {
@@ -616,7 +616,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let error = discover_skills(dir.path(), Some("../x"), DiscoverSkillsOptions::default())
             .unwrap_err();
-        assert!(error.starts_with("Invalid subpath"));
+        assert!(error.to_string().starts_with("Invalid subpath"));
     }
 
     #[test]

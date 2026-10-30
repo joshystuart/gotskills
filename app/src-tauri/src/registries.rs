@@ -1,10 +1,12 @@
-use crate::types::RegistrySource;
+use std::path::Path;
+
 use rusqlite::{named_params, Connection, OptionalExtension, Row};
 use url::Url;
 use uuid::Uuid;
 
 use crate::db::{transaction, SyncMarkerStatus};
 use crate::error::{AppError, AppResult};
+use crate::types::RegistrySource;
 
 /// In-memory shape of a Registry row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,15 +258,23 @@ pub fn hard_delete_registry(conn: &Connection, id: &str) -> rusqlite::Result<()>
 }
 
 /// Registry Name: the friendly name when set, else the automatic name.
-pub fn registry_label(registry: &StoredRegistry) -> String {
+pub fn registry_label(registry: &StoredRegistry, home: &Path) -> String {
     registry
         .name
         .clone()
-        .unwrap_or_else(|| automatic_registry_name(registry))
+        .unwrap_or_else(|| automatic_registry_name(registry, home))
 }
 
-/// Automatic name: `owner/repo` for GitHub, else `host/path`.
-pub fn automatic_registry_name(registry: &StoredRegistry) -> String {
+/// Automatic name: the folder path with `home` shortened to `~` for a Local
+/// Registry, `owner/repo` for GitHub, else `host/path`.
+pub fn automatic_registry_name(registry: &StoredRegistry, home: &Path) -> String {
+    if registry.source == RegistrySource::Local {
+        let home = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+        return Path::new(&registry.url)
+            .strip_prefix(home)
+            .map(|path| format!("~/{}", path.display()))
+            .unwrap_or_else(|_| registry.url.clone());
+    }
     automatic_name(
         registry.github_owner.as_deref(),
         registry.github_repo.as_deref(),
@@ -432,7 +442,7 @@ mod tests {
             (updated.branch.as_str(), updated.url.as_str()),
             ("dev", "https://github.com/o/a")
         );
-        assert_eq!(registry_label(&updated), "Friendly");
+        assert_eq!(registry_label(&updated, Path::new("/home")), "Friendly");
         let cleared = update_registry(
             &db,
             &r.id,
@@ -442,7 +452,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(registry_label(&cleared), "o/a");
+        assert_eq!(registry_label(&cleared, Path::new("/home")), "o/a");
         assert_eq!(
             get_registry(&db, &r.id).unwrap().unwrap().colour.as_deref(),
             Some("#aabbcc")

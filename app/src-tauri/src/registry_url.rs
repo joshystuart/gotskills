@@ -3,10 +3,12 @@ use std::sync::OnceLock;
 use url::Url;
 
 use crate::error::AppError;
+use crate::types::RegistrySource;
 
 /// A validated, canonicalised Registry Git URL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalRegistry {
+    pub source: RegistrySource,
     pub url: String,
     pub canonical_key: String,
     pub github_owner: Option<String>,
@@ -61,6 +63,7 @@ fn to_owner_repo(pathname: &str) -> Option<(String, String)> {
 
 fn github_result(owner: String, repo: String, url: &str) -> CanonicalRegistry {
     CanonicalRegistry {
+        source: RegistrySource::Git,
         url: url.to_string(),
         canonical_key: format!("github:{}/{}", owner.to_lowercase(), repo.to_lowercase()),
         label: format!("{owner}/{repo}"),
@@ -72,6 +75,7 @@ fn github_result(owner: String, repo: String, url: &str) -> CanonicalRegistry {
 
 fn generic_result(url: &str, body: &str, label: String) -> CanonicalRegistry {
     CanonicalRegistry {
+        source: RegistrySource::Git,
         url: url.to_string(),
         canonical_key: format!("git:{body}"),
         github_owner: None,
@@ -95,6 +99,7 @@ pub fn canonicalize_registry_url(input: &str) -> Result<CanonicalRegistry, AppEr
 
     if is_local_path(url) {
         let mut result = generic_result(url, url, url.to_string());
+        result.source = RegistrySource::Local;
         result.canonical_key = format!("local:{url}");
         return Ok(result);
     }

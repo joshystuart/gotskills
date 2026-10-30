@@ -74,19 +74,21 @@ mod tests {
             assert_eq!(marker.last_sync_at.as_deref(), Some("synced-at"));
             assert!(marker.stale);
         }
-        crate::registries::record_marker_failure(
-            &db,
-            "ok",
+        for status in [
             crate::db::SyncMarkerStatus::FolderNotFound,
-        )
-        .unwrap();
-        assert_eq!(
-            crate::registries::get_marker(&db, "ok")
-                .unwrap()
-                .unwrap()
-                .status,
-            crate::db::SyncMarkerStatus::FolderNotFound
-        );
+            crate::db::SyncMarkerStatus::FolderUnreadable,
+            crate::db::SyncMarkerStatus::FolderChanged,
+            crate::db::SyncMarkerStatus::SnapshotFailed,
+        ] {
+            crate::registries::record_marker_failure(&db, "ok", status).unwrap();
+            assert_eq!(
+                crate::registries::get_marker(&db, "ok")
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                status
+            );
+        }
         assert_eq!(
             count(&db, "SELECT count(*) FROM pragma_foreign_key_check"),
             0
@@ -133,7 +135,7 @@ mod tests {
     fn fresh_database_has_the_final_schema_and_pragmas() {
         let dir = tempfile::tempdir().unwrap();
         let db = open_database(&dir.path().join("cache.sqlite")).unwrap();
-        assert_eq!(user_version(&db).unwrap(), 13);
+        assert_eq!(user_version(&db).unwrap(), 14);
         assert_eq!(count(&db, "PRAGMA foreign_keys"), 1);
         let mode: String = db
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
@@ -197,7 +199,7 @@ mod tests {
             .unwrap();
         drop(previous);
         let db = open_database(&path).unwrap();
-        assert_eq!(user_version(&db).unwrap(), 13);
+        assert_eq!(user_version(&db).unwrap(), 14);
         let (branch, colour, name): (String, Option<String>, Option<String>) = db
             .query_row(
                 "SELECT branch, colour, name FROM registry WHERE id = 'saved'",
@@ -303,7 +305,7 @@ mod tests {
             .unwrap();
         drop(first);
         let second = open_database(&path).unwrap();
-        assert_eq!(user_version(&second).unwrap(), 13);
+        assert_eq!(user_version(&second).unwrap(), 14);
         assert_eq!(
             count(&second, "SELECT count(*) FROM registry WHERE id = 'r1'"),
             1
@@ -328,7 +330,7 @@ mod tests {
         .unwrap();
         drop(v3);
         let db = open_database(&path).unwrap();
-        assert_eq!(user_version(&db).unwrap(), 13);
+        assert_eq!(user_version(&db).unwrap(), 14);
         let installation: String = db
             .query_row(
                 "SELECT installation_id FROM telemetry_event WHERE event_id = 'event-a'",
@@ -386,6 +388,6 @@ mod tests {
     #[test]
     fn migrations_are_numbered_contiguously() {
         let versions: Vec<i64> = MIGRATIONS.iter().map(|(v, _)| *v).collect();
-        assert_eq!(versions, (1..=13).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=14).collect::<Vec<_>>());
     }
 }

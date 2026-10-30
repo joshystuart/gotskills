@@ -6,7 +6,6 @@
 //! only ever locked for short sections, and syncs write through their own
 //! connection so reads stay responsive during a fetch.
 
-use crate::types::RegistrySource;
 pub mod app_update;
 pub mod appearance;
 mod local_watch;
@@ -57,9 +56,9 @@ use crate::telemetry::{
 use crate::types::{
     skill_id, AddRegistryRequest, Appearance, AppearancePatch, AutoUpdateFailure, AutoUpdateResult,
     AutoUpdatedSkill, CatalogueSnapshot, FontSize, InstallRequest, InstallResult,
-    InstallTargetStatus, ReconcileReport, ReconcileState, RegistryRecord, RegistrySyncStatus,
-    SkillFileContent, SkillFileList, SkillFileReadRequest, SkillFileRequest, SyncAllResult,
-    SyncFailureReason, SyncPhase, SyncStatus, TargetDetection, TargetOutcome, Theme,
+    InstallTargetStatus, ReconcileReport, ReconcileState, RegistryRecord, RegistrySource,
+    RegistrySyncStatus, SkillFileContent, SkillFileList, SkillFileReadRequest, SkillFileRequest,
+    SyncAllResult, SyncFailureReason, SyncPhase, SyncStatus, TargetDetection, TargetOutcome, Theme,
     UninstallRequest, UninstallResult, UninstallTargetResult, UpdateRegistryRequest,
     MAX_REGISTRY_NAME_LENGTH,
 };
@@ -154,6 +153,9 @@ fn marker_status_for(reason: SyncFailureReason) -> SyncMarkerStatus {
         SyncFailureReason::Empty => SyncMarkerStatus::Empty,
         SyncFailureReason::AccessRequired => SyncMarkerStatus::AccessRequired,
         SyncFailureReason::FolderNotFound => SyncMarkerStatus::FolderNotFound,
+        SyncFailureReason::FolderUnreadable => SyncMarkerStatus::FolderUnreadable,
+        SyncFailureReason::FolderChanged => SyncMarkerStatus::FolderChanged,
+        SyncFailureReason::SnapshotFailed => SyncMarkerStatus::SnapshotFailed,
     }
 }
 
@@ -352,29 +354,17 @@ impl Backend {
         }
     }
 
-    fn automatic_registry_name(&self, registry: &StoredRegistry) -> String {
-        if registry.source != RegistrySource::Local {
-            return crate::registries::automatic_registry_name(registry);
-        }
-        let home = std::fs::canonicalize(&self.environment.home)
-            .unwrap_or_else(|_| self.environment.home.clone());
-        std::path::Path::new(&registry.url)
-            .strip_prefix(home)
-            .map(|path| format!("~/{}", path.display()))
-            .unwrap_or_else(|_| registry.url.clone())
-    }
-
     fn registry_label(&self, registry: &StoredRegistry) -> String {
-        registry
-            .name
-            .clone()
-            .unwrap_or_else(|| self.automatic_registry_name(registry))
+        crate::registries::registry_label(registry, &self.environment.home)
     }
 
     fn to_record(&self, conn: &Connection, registry: &StoredRegistry) -> AppResult<RegistryRecord> {
         Ok(RegistryRecord {
             source: registry.source,
-            automatic_name: self.automatic_registry_name(registry),
+            automatic_name: crate::registries::automatic_registry_name(
+                registry,
+                &self.environment.home,
+            ),
             id: registry.id.clone(),
             url: registry.url.clone(),
             branch: registry.branch.clone(),
@@ -451,10 +441,12 @@ impl Backend {
                 self.telemetry.emit(&conn, event)?;
             }
             Err(error) => {
-                let reason = if registry.source == RegistrySource::Local {
-                    SyncFailureReason::FolderNotFound
-                } else {
-                    classify_git_error(&redact_git_error(&error.message))
+                let reason = match (registry.source, error.reason) {
+                    (_, Some(reason)) => reason,
+                    (RegistrySource::Local, None) => SyncFailureReason::SnapshotFailed,
+                    (RegistrySource::Git, None) => {
+                        classify_git_error(&redact_git_error(&error.message))
+                    }
                 };
                 record_sync_failure(&conn, &registry.id, marker_status_for(reason))?;
             }
@@ -468,46 +460,57 @@ impl Backend {
     /// Sync one registry; concurrent requests for the same id wait for the
     /// running sync and share its result.
     fn do_sync(&self, registry: &StoredRegistry) -> AppResult<RegistrySyncStatus> {
-        self.do_sync_pending(registry, false)
+        let (runtime, waited) = self.wait_for_running_sync(&registry.id);
+        if waited {
+            drop(runtime);
+            return self.registry_status(&self.db(), &registry.id);
+        }
+        let _guard = self.claim_sync(runtime, &registry.id);
+        self.sync_and_auto_update(registry)
     }
 
-    fn do_sync_pending(
-        &self,
-        registry: &StoredRegistry,
-        follow_up: bool,
-    ) -> AppResult<RegistrySyncStatus> {
-        {
-            let mut runtime = self.runtime();
-            if runtime.in_flight.contains(&registry.id) {
-                while runtime.in_flight.contains(&registry.id) {
-                    runtime = self
-                        .sync_done
-                        .wait(runtime)
-                        .unwrap_or_else(|p| p.into_inner());
-                }
-                if !follow_up {
-                    drop(runtime);
-                    return self.registry_status(&self.db(), &registry.id);
-                }
-            }
-            runtime.in_flight.insert(registry.id.clone());
+    /// Sync a registry whose folder changed. Unlike [`Self::do_sync`], a
+    /// running sync isn't shared: this waits for it, then syncs again with the
+    /// registry re-read, so changes made during that sync are picked up.
+    fn sync_after_change(&self, registry_id: &str) -> AppResult<RegistrySyncStatus> {
+        let (runtime, _) = self.wait_for_running_sync(registry_id);
+        let _guard = self.claim_sync(runtime, registry_id);
+        let Some(registry) =
+            get_registry(&self.db(), registry_id)?.filter(|registry| registry.is_watchable())
+        else {
+            return self.registry_status(&self.db(), registry_id);
+        };
+        self.sync_and_auto_update(&registry)
+    }
+
+    /// Block until no sync of `registry_id` is running; true when one was.
+    fn wait_for_running_sync(&self, registry_id: &str) -> (MutexGuard<'_, RuntimeState>, bool) {
+        let mut runtime = self.runtime();
+        let waited = runtime.in_flight.contains(registry_id);
+        while runtime.in_flight.contains(registry_id) {
+            runtime = self
+                .sync_done
+                .wait(runtime)
+                .unwrap_or_else(|p| p.into_inner());
         }
+        (runtime, waited)
+    }
+
+    fn claim_sync(
+        &self,
+        mut runtime: MutexGuard<'_, RuntimeState>,
+        registry_id: &str,
+    ) -> InFlightGuard<'_> {
+        runtime.in_flight.insert(registry_id.to_string());
+        drop(runtime);
         self.signal_busy_change();
-        let _guard = InFlightGuard {
+        InFlightGuard {
             backend: self,
-            registry_id: registry.id.clone(),
-        };
-        let refreshed;
-        let registry = if follow_up {
-            refreshed =
-                get_registry(&self.db(), &registry.id)?.filter(|registry| registry.is_watchable());
-            let Some(registry) = refreshed.as_ref() else {
-                return self.registry_status(&self.db(), &registry.id);
-            };
-            registry
-        } else {
-            registry
-        };
+            registry_id: registry_id.to_string(),
+        }
+    }
+
+    fn sync_and_auto_update(&self, registry: &StoredRegistry) -> AppResult<RegistrySyncStatus> {
         let (status, scanned) = self.sync_exclusive(registry)?;
         if status.phase == SyncPhase::Synced && scanned {
             self.apply_auto_updates(&registry.id)?;
@@ -528,7 +531,7 @@ impl Backend {
             let conn = self.db();
             let report = self.reconcile_report(&conn, None, None)?;
             let records = read_install_records(&conn, &InstallRecordFilter::default())?;
-            let skills = read_catalogue(&conn, &report, &records)?.skills;
+            let skills = read_catalogue(&conn, &report, &records, &self.environment.home)?.skills;
             let scoped = self.reconcile_report(&conn, Some(registry_id), None)?;
             let mut pending: BTreeMap<String, Vec<String>> = BTreeMap::new();
             for entry in scoped
@@ -958,7 +961,7 @@ impl Backend {
         let conn = self.db();
         let report = self.reconcile_report(&conn, None, None)?;
         let records = read_install_records(&conn, &InstallRecordFilter::default())?;
-        let snapshot = read_catalogue(&conn, &report, &records)?;
+        let snapshot = read_catalogue(&conn, &report, &records, &self.environment.home)?;
         Ok(CatalogueSnapshot {
             skills: snapshot.skills,
             sync_status: self.compute_status_with(&conn)?,
@@ -983,8 +986,7 @@ impl Backend {
 
     fn canonical_registry(&self, url: &str) -> AppResult<crate::registry_url::CanonicalRegistry> {
         let mut canonical = canonicalize_registry_url(url)?;
-        let local = crate::registry_url::is_local_path(url);
-        if local {
+        if canonical.source == RegistrySource::Local {
             let expanded = if url.trim() == "~" {
                 self.environment.home.clone()
             } else if url.trim().starts_with("~/") {
@@ -1027,7 +1029,6 @@ impl Backend {
 
     pub fn add_registry(&self, request: &AddRegistryRequest) -> AppResult<RegistryRecord> {
         let canonical = self.canonical_registry(&request.url)?;
-        let local = crate::registry_url::is_local_path(&request.url);
         if let Some(existing) = find_by_canonical_key(&self.db(), &canonical.canonical_key)? {
             return Err(AppError::failed(format!(
                 "A registry for {} is already configured (id {}).",
@@ -1035,7 +1036,7 @@ impl Backend {
                 existing.id
             )));
         }
-        let branch = if local {
+        let branch = if canonical.source == RegistrySource::Local {
             String::new()
         } else {
             self.registry_branch(request.branch.as_deref(), &canonical.url)?
@@ -1043,11 +1044,7 @@ impl Backend {
         let stored = insert_registry(
             &self.db(),
             &InsertRegistryInput {
-                source: if local {
-                    RegistrySource::Local
-                } else {
-                    RegistrySource::Git
-                },
+                source: canonical.source,
                 url: canonical.url,
                 branch,
                 enabled: request.enabled.unwrap_or(true),
@@ -1096,7 +1093,6 @@ impl Backend {
                 .filter(|url| url.trim() != current.url)
             {
                 let canonical = self.canonical_registry(url)?;
-                let local = crate::registry_url::is_local_path(url);
                 if let Some(clash) = find_by_canonical_key(&conn, &canonical.canonical_key)?
                     .filter(|clash| clash.id != current.id)
                 {
@@ -1106,12 +1102,8 @@ impl Backend {
                         clash.id
                     )));
                 }
-                fields.source = Some(if local {
-                    RegistrySource::Local
-                } else {
-                    RegistrySource::Git
-                });
-                if local {
+                fields.source = Some(canonical.source);
+                if canonical.source == RegistrySource::Local {
                     fields.branch = Some(String::new());
                 } else if current.source == RegistrySource::Local {
                     fields.branch =

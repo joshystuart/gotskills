@@ -922,9 +922,7 @@ fn refresh_respects_concurrency_and_uses_the_next_setting() {
                 std::thread::sleep(Duration::from_millis(30));
                 active.fetch_sub(1, Ordering::SeqCst);
             }
-            Err(GitError {
-                message: "offline".into(),
-            })
+            Err(GitError::new("offline"))
         })
     };
     let h = harness_with(Some(sync));
@@ -1118,6 +1116,12 @@ fn local_identity_and_folder_guards_use_real_paths() {
         "~".to_string(),
         "/".into(),
         h.data.path().to_string_lossy().into_owned(),
+        h.data
+            .path()
+            .parent()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
     ] {
         assert!(add_path(path)
             .unwrap_err()
@@ -1146,6 +1150,9 @@ fn local_content_changes_offer_updates_and_conflict_with_git_skills() {
     let skills = h.backend.get_catalogue().unwrap().skills;
     assert_eq!(skills.len(), 2);
     assert!(skills.iter().all(|skill| skill.conflict));
+    assert!(skills
+        .iter()
+        .any(|skill| skill.registry_label == "~/drafts"));
     h.backend
         .install(&install_request(&registry, "alpha", &["~/.agents/skills"]))
         .unwrap();
@@ -1231,6 +1238,12 @@ fn registry_source_switch_rejects_duplicates_and_unsafe_folders_without_changes(
         "~".to_string(),
         "/".into(),
         h.data.path().to_string_lossy().into_owned(),
+        h.data
+            .path()
+            .parent()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
     ] {
         change.url = Some(path);
         assert!(h
@@ -1362,8 +1375,9 @@ fn unreadable_nested_local_skill_keeps_catalogue_stale_until_recovery() {
         let status = result.unwrap();
         assert_eq!(
             serde_json::to_value(&status).unwrap()["reason"],
-            "folder-not-found"
+            "folder-unreadable"
         );
+        assert_eq!(status.folder_path.as_deref(), Some(registry.url.as_str()));
         assert_eq!(status.stale, Some(true));
         assert_eq!(status.revision, registry.sync_status.revision);
         assert_eq!(folders(&h.backend), vec!["alpha"]);

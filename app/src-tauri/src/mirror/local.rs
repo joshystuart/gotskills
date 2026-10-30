@@ -8,12 +8,54 @@ use sha2::{Digest, Sha256};
 use super::discovery::skills::{discover_skills, parse_skill_md, DiscoverSkillsOptions};
 use super::scan::{locale_compare, ScannedSkill};
 use crate::installer::copy::{copy_tree, paths_overlap};
+use crate::types::SyncFailureReason;
 
 /// A complete Local Registry snapshot and its content revision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalSnapshot {
     pub skills: Vec<ScannedSkill>,
     pub revision: String,
+}
+
+/// Why a Local Registry snapshot failed. The last-good snapshot is kept.
+#[derive(Debug, thiserror::Error)]
+pub enum SnapshotError {
+    #[error("Registry folder not found")]
+    FolderNotFound,
+    #[error("Registry folder can't be read: {0}")]
+    FolderUnreadable(io::Error),
+    #[error("Registry folder changed during the snapshot")]
+    FolderChanged,
+    #[error("Couldn't save the snapshot: {0}")]
+    SaveFailed(io::Error),
+}
+
+impl SnapshotError {
+    pub fn reason(&self) -> SyncFailureReason {
+        match self {
+            SnapshotError::FolderNotFound => SyncFailureReason::FolderNotFound,
+            SnapshotError::FolderUnreadable(_) => SyncFailureReason::FolderUnreadable,
+            SnapshotError::FolderChanged => SyncFailureReason::FolderChanged,
+            SnapshotError::SaveFailed(_) => SyncFailureReason::SnapshotFailed,
+        }
+    }
+
+    fn opening(error: io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => SnapshotError::FolderNotFound,
+            _ => SnapshotError::FolderUnreadable(error),
+        }
+    }
+
+    fn reading(error: io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::NotFound => SnapshotError::FolderChanged,
+            io::ErrorKind::StorageFull
+            | io::ErrorKind::QuotaExceeded
+            | io::ErrorKind::ReadOnlyFilesystem => SnapshotError::SaveFailed(error),
+            _ => SnapshotError::FolderUnreadable(error),
+        }
+    }
 }
 
 fn hash_field(hash: &mut Sha256, bytes: &[u8]) {
@@ -53,21 +95,22 @@ fn hash_tree(root: &Path, directory: &Path, hash: &mut Sha256) -> io::Result<Sys
 }
 
 /// Copy discovered skills into a last-good mirror without invoking Git.
-pub fn snapshot_local(source: &Path, destination: &Path) -> io::Result<LocalSnapshot> {
-    let source_path = fs::canonicalize(source)?;
+pub fn snapshot_local(source: &Path, destination: &Path) -> Result<LocalSnapshot, SnapshotError> {
+    let source_path = fs::canonicalize(source).map_err(SnapshotError::opening)?;
     let source = source_path.as_path();
-    fs::read_dir(source)?;
+    fs::read_dir(source).map_err(SnapshotError::opening)?;
+    let save_failed = |message: &str| SnapshotError::SaveFailed(io::Error::other(message));
     if paths_overlap(source, destination) {
-        return Err(io::Error::other("Snapshot source and destination overlap"));
+        return Err(save_failed("Snapshot source and destination overlap"));
     }
     let parent = destination
         .parent()
-        .ok_or_else(|| io::Error::other("Missing destination parent"))?;
-    fs::create_dir_all(parent)?;
+        .ok_or_else(|| save_failed("Missing destination parent"))?;
+    fs::create_dir_all(parent).map_err(SnapshotError::SaveFailed)?;
     let suffix = uuid::Uuid::new_v4();
     let staging = destination.with_extension(format!("snapshot-{suffix}"));
     let result = (|| {
-        fs::create_dir(&staging)?;
+        fs::create_dir(&staging).map_err(SnapshotError::SaveFailed)?;
         let discovered = discover_skills(
             source,
             None,
@@ -76,16 +119,20 @@ pub fn snapshot_local(source: &Path, destination: &Path) -> io::Result<LocalSnap
                 ..Default::default()
             },
         )
-        .map_err(io::Error::other)?;
+        .map_err(SnapshotError::reading)?;
         let mut skills = Vec::new();
         for skill in discovered {
-            let relative = skill.path.strip_prefix(source).map_err(io::Error::other)?;
+            let relative = skill
+                .path
+                .strip_prefix(source)
+                .map_err(|_| SnapshotError::FolderChanged)?;
             let copied = staging.join(relative);
-            copy_tree(&skill.path, &copied, true)?;
+            copy_tree(&skill.path, &copied, true).map_err(SnapshotError::reading)?;
             let metadata = parse_skill_md(&copied.join("SKILL.md"), false)
-                .ok_or_else(|| io::Error::other("Skill metadata changed during snapshot"))?;
+                .ok_or(SnapshotError::FolderChanged)?;
             let mut hash = Sha256::new();
-            let updated = hash_tree(&copied, &copied, &mut hash)?;
+            let updated =
+                hash_tree(&copied, &copied, &mut hash).map_err(SnapshotError::SaveFailed)?;
             let content_hash = format!("{:x}", hash.finalize());
             skills.push(ScannedSkill {
                 id: metadata.name.clone(),
@@ -111,23 +158,33 @@ pub fn snapshot_local(source: &Path, destination: &Path) -> io::Result<LocalSnap
             skills,
             revision: format!("{:x}", revision.finalize()),
         };
-        if destination.exists() {
-            let backup = destination.with_extension(format!("backup-{suffix}"));
-            fs::rename(destination, &backup)?;
-            if let Err(error) = fs::rename(&staging, destination) {
-                fs::rename(&backup, destination)?;
-                return Err(error);
-            }
-            let _ = fs::remove_dir_all(backup);
-        } else {
-            fs::rename(&staging, destination)?;
-        }
+        replace_mirror(&staging, destination, suffix).map_err(SnapshotError::SaveFailed)?;
         Ok(snapshot)
     })();
     if result.is_err() {
         let _ = fs::remove_dir_all(staging);
     }
-    result
+    result.map_err(|error| {
+        if source.is_dir() {
+            error
+        } else {
+            SnapshotError::FolderNotFound
+        }
+    })
+}
+
+fn replace_mirror(staging: &Path, destination: &Path, suffix: uuid::Uuid) -> io::Result<()> {
+    if !destination.exists() {
+        return fs::rename(staging, destination);
+    }
+    let backup = destination.with_extension(format!("backup-{suffix}"));
+    fs::rename(destination, &backup)?;
+    if let Err(error) = fs::rename(staging, destination) {
+        fs::rename(&backup, destination)?;
+        return Err(error);
+    }
+    let _ = fs::remove_dir_all(backup);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -334,7 +391,7 @@ mod tests {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
         let result = snapshot_local(&source, &destination);
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(result.is_err());
+        assert!(matches!(result, Err(SnapshotError::FolderUnreadable(_))));
         assert_eq!(
             fs::read(destination.join("skills/alpha/SKILL.md")).unwrap(),
             before
@@ -355,7 +412,7 @@ mod tests {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
         let result = snapshot_local(&source, &destination);
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(result.is_err());
+        assert!(matches!(result, Err(SnapshotError::FolderUnreadable(_))));
         assert_eq!(
             fs::read(destination.join("skills/alpha/SKILL.md")).unwrap(),
             before
@@ -421,7 +478,10 @@ mod tests {
         snapshot_local(&source, &destination).unwrap();
         let before = fs::read(destination.join("SKILL.md")).unwrap();
         fs::remove_dir_all(&source).unwrap();
-        assert!(snapshot_local(&source, &destination).is_err());
+        assert!(matches!(
+            snapshot_local(&source, &destination),
+            Err(SnapshotError::FolderNotFound)
+        ));
         assert_eq!(fs::read(destination.join("SKILL.md")).unwrap(), before);
     }
 
@@ -438,15 +498,38 @@ mod tests {
         fs::set_permissions(&source, fs::Permissions::from_mode(0o000)).unwrap();
         let result = snapshot_local(&source, &destination);
         fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(result.is_err());
+        assert!(matches!(result, Err(SnapshotError::FolderUnreadable(_))));
         assert_eq!(fs::read(destination.join("SKILL.md")).unwrap(), before);
         write(&source, "new.txt", "not copied");
         fs::set_permissions(source.join("new.txt"), fs::Permissions::from_mode(0o000)).unwrap();
         let result = snapshot_local(&source, &destination);
         fs::set_permissions(source.join("new.txt"), fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(result.is_err());
+        assert!(matches!(result, Err(SnapshotError::FolderUnreadable(_))));
         assert_eq!(fs::read(destination.join("SKILL.md")).unwrap(), before);
         assert!(!destination.join("new.txt").exists());
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unwritable_mirror_reports_a_failed_save() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let mirrors = root.path().join("mirrors");
+        skill(&source, ".", "root");
+        fs::create_dir(&mirrors).unwrap();
+        fs::set_permissions(&mirrors, fs::Permissions::from_mode(0o555)).unwrap();
+        let result = snapshot_local(&source, &mirrors.join("registry"));
+        fs::set_permissions(&mirrors, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(result, Err(SnapshotError::SaveFailed(_))));
+    }
+
+    #[test]
+    fn files_vanishing_mid_read_report_a_changed_folder() {
+        let error = SnapshotError::reading(io::Error::from(io::ErrorKind::NotFound));
+        assert_eq!(error.reason(), SyncFailureReason::FolderChanged);
+        let error = SnapshotError::reading(io::Error::from(io::ErrorKind::StorageFull));
+        assert_eq!(error.reason(), SyncFailureReason::SnapshotFailed);
     }
 }

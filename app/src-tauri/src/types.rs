@@ -59,6 +59,23 @@ pub enum SyncFailureReason {
     Empty,
     AccessRequired,
     FolderNotFound,
+    FolderUnreadable,
+    FolderChanged,
+    SnapshotFailed,
+}
+
+impl SyncFailureReason {
+    /// Whether this reason is about a Local Registry folder, so its status
+    /// names the folder path.
+    pub fn is_local(self) -> bool {
+        matches!(
+            self,
+            SyncFailureReason::FolderNotFound
+                | SyncFailureReason::FolderUnreadable
+                | SyncFailureReason::FolderChanged
+                | SyncFailureReason::SnapshotFailed
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

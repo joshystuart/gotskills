@@ -1,4 +1,3 @@
-use crate::types::RegistrySource;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -6,6 +5,7 @@ use rusqlite::{named_params, Connection};
 
 use crate::db::{transaction, SyncMarkerStatus};
 use crate::registries::{get_marker, upsert_marker_success};
+use crate::types::RegistrySource;
 
 use super::git::{ensure_mirror_since, MirrorConfig};
 use super::git_exec::GitError;
@@ -129,9 +129,8 @@ pub fn sync_registry(
     if config.source == RegistrySource::Local {
         let snapshot =
             super::local::snapshot_local(std::path::Path::new(&config.url), &config.mirror_path)?;
-        let marker = get_marker(conn, &config.registry_id).map_err(|error| GitError {
-            message: error.to_string(),
-        })?;
+        let marker = get_marker(conn, &config.registry_id)
+            .map_err(|error| GitError::new(error.to_string()))?;
         if let Some(marker) = marker.filter(|marker| {
             !marker.stale
                 && marker.last_sync_revision.as_deref() == Some(&snapshot.revision)
