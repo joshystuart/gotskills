@@ -12,40 +12,42 @@ on:
         description: Existing tag to rebuild and release (e.g. v0.0.1)
         required: true
         type: string
+      dry_run:
+        description: Build and package without signing or publishing
+        type: boolean
+        default: false
 
 concurrency:
   group: tauri-release-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build-and-release:
-    runs-on: macos-latest
-    environment: release
+  resolve-release:
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      revision: ${{ steps.release.outputs.revision }}
+      skip: ${{ steps.release.outputs.skip }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: app/package-lock.json
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.sha }}
 
       - name: Resolve release tag
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF_NAME}"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            TAG="$REQUESTED_TAG"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="$GITHUB_REF_NAME"
           else
             VERSION=$(node -p "require('./app/package.json').version")
             TAG="v${VERSION}"
@@ -57,64 +59,134 @@ jobs:
           fi
 
           VERSION="${TAG#v}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version format: $VERSION" >&2
+            exit 1
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "revision=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Setup Rust
-        if: steps.release.outputs.skip != 'true'
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+  build-binaries:
+    needs: resolve-release
+    if: needs.resolve-release.outputs.skip != 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    env:
+      RELEASE_VERSION: ${{ needs.resolve-release.outputs.version }}
 
-      - name: Cache cargo
-        if: steps.release.outputs.skip != 'true'
-        uses: Swatinem/rust-cache@v2
+    steps:
+      - name: Checkout release revision
+        uses: actions/checkout@v7
         with:
-          workspaces: app/src-tauri
+          ref: ${{ needs.resolve-release.outputs.revision }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
 
       - name: Install dependencies
-        if: steps.release.outputs.skip != 'true'
         working-directory: app
         run: npm ci
 
-      - name: Validate version format
-        if: steps.release.outputs.skip != 'true'
-        run: |
-          if ! [[ "${{ steps.release.outputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
-            echo "Invalid version format: ${{ steps.release.outputs.version }}"
-            exit 1
-          fi
-
-      - name: Update app package version
-        if: steps.release.outputs.skip != 'true'
+      - name: Set release version
         working-directory: app
         run: |
-          npm pkg set version="${{ steps.release.outputs.version }}" || {
-            echo "Failed to update package.json version"
-            exit 1
-          }
+          npm pkg set version="$RELEASE_VERSION"
+          sed -i '' '1,/^version = /s/^version = .*/version = "'"$RELEASE_VERSION"'"/' src-tauri/Cargo.toml
+          test "$(node -p "require('./package.json').version")" = "$RELEASE_VERSION"
+          grep -Fx "version = \"$RELEASE_VERSION\"" src-tauri/Cargo.toml
 
-      - name: Update Cargo version
-        if: steps.release.outputs.skip != 'true'
-        working-directory: app/src-tauri
-        run: |
-          sed -i '' '1,/^version = /s/^version = .*/version = "${{ steps.release.outputs.version }}"/' Cargo.toml
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
-      - name: Verify version update
-        if: steps.release.outputs.skip != 'true'
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        working-directory: app
+        run: npm run build -- --target ${{ matrix.target }} --no-bundle --config '{"bundle":{"createUpdaterArtifacts":true}}'
+
+      - name: Upload release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bin-${{ matrix.target }}
+          path: app/src-tauri/target/${{ matrix.target }}/release/got-skills
+          if-no-files-found: error
+          retention-days: 1
+
+  build-and-release:
+    needs: [resolve-release, build-binaries]
+    runs-on: macos-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.resolve-release.outputs.version }}
+
+    steps:
+      - name: Checkout release revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve-release.outputs.revision }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Set release version
+        working-directory: app
         run: |
-          ACTUAL_VERSION=$(node -p "require('./app/package.json').version")
-          if [ "$ACTUAL_VERSION" != "${{ steps.release.outputs.version }}" ]; then
-            echo "Version mismatch: expected ${{ steps.release.outputs.version }}, got $ACTUAL_VERSION"
-            exit 1
-          fi
-          if ! grep -q '^version = "${{ steps.release.outputs.version }}"' app/src-tauri/Cargo.toml; then
-            echo "Cargo.toml version was not updated"
-            exit 1
-          fi
+          npm pkg set version="$RELEASE_VERSION"
+          sed -i '' '1,/^version = /s/^version = .*/version = "'"$RELEASE_VERSION"'"/' src-tauri/Cargo.toml
+          test "$(node -p "require('./package.json').version")" = "$RELEASE_VERSION"
+          grep -Fx "version = \"$RELEASE_VERSION\"" src-tauri/Cargo.toml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download release binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-bin-*
+          path: release-binaries
+
+      - name: Assemble universal binary
+        run: |
+          ARM=release-binaries/release-bin-aarch64-apple-darwin/got-skills
+          INTEL=release-binaries/release-bin-x86_64-apple-darwin/got-skills
+          UNIVERSAL=app/src-tauri/target/universal-apple-darwin/release/got-skills
+          lipo "$ARM" -verify_arch arm64
+          lipo "$INTEL" -verify_arch x86_64
+          mkdir -p "$(dirname "$UNIVERSAL")"
+          lipo -create "$ARM" "$INTEL" -output "$UNIVERSAL"
+          chmod +x "$UNIVERSAL"
+          lipo "$UNIVERSAL" -verify_arch arm64 x86_64
 
       - name: Import Apple signing certificate
-        if: steps.release.outputs.skip != 'true'
+        if: inputs.dry_run != true
         env:
           MAC_CERTIFICATE_P12_BASE64: ${{ secrets.MAC_CERTIFICATE_P12_BASE64 }}
           MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
@@ -147,8 +219,11 @@ jobs:
 
           security import "$CERT_PATH" -f pkcs12 -k "$KEYCHAIN_PATH" -P "$MAC_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          EXISTING_KEYCHAINS=$(security list-keychains -d user | tr -d '"' | xargs)
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $EXISTING_KEYCHAINS
+          EXISTING_KEYCHAINS=()
+          while IFS= read -r keychain; do
+            EXISTING_KEYCHAINS+=("$keychain")
+          done < <(security list-keychains -d user | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//')
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "${EXISTING_KEYCHAINS[@]}"
           security default-keychain -d user -s "$KEYCHAIN_PATH"
 
           CSC_NAME=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F '"' '/Developer ID Application/ { print $2; exit }' | sed 's/^Developer ID Application: //')
@@ -162,8 +237,8 @@ jobs:
 
           echo "APPLE_SIGNING_IDENTITY=Developer ID Application: $CSC_NAME" >> "$GITHUB_ENV"
 
-      - name: Build signed release files
-        if: steps.release.outputs.skip != 'true'
+      - name: Bundle signed release files
+        if: inputs.dry_run != true
         working-directory: app
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -171,23 +246,52 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run build:release -- --target universal-apple-darwin
+        run: npx tauri bundle --target universal-apple-darwin --bundles app,dmg,updater --config '{"bundle":{"createUpdaterArtifacts":true}}'
+
+      - name: Bundle unsigned dry run
+        if: inputs.dry_run == true
+        working-directory: app
+        run: npx tauri bundle --target universal-apple-darwin --bundles app,dmg --no-sign
+
+      - name: Check universal app and size
+        working-directory: app
+        run: |
+          BUNDLE=src-tauri/target/universal-apple-darwin/release/bundle
+          lipo "$BUNDLE/macos/Got Skills.app/Contents/MacOS/got-skills" -verify_arch arm64 x86_64
+          scripts/check-app-size.sh "$BUNDLE/macos/Got Skills.app"
+
+      - name: Verify release signing and notarization
+        if: inputs.dry_run != true
+        working-directory: app
+        run: |
+          APP=src-tauri/target/universal-apple-darwin/release/bundle/macos/Got Skills.app
+          codesign --verify --deep --strict "$APP"
+          xcrun stapler validate "$APP"
+
+      - name: Upload dry-run bundles
+        if: inputs.dry_run == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-dry-run
+          path: app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Collect release files and write latest.json
-        if: steps.release.outputs.skip != 'true'
+        if: inputs.dry_run != true
         working-directory: app
         run: |
           BUNDLE=src-tauri/target/universal-apple-darwin/release/bundle
           mkdir -p release
-          cp "$BUNDLE"/dmg/*.dmg "release/Got-Skills-${{ steps.release.outputs.version }}-universal.dmg"
-          node scripts/updaterFeed.mjs "$BUNDLE" release "${{ steps.release.outputs.version }}" "${{ steps.release.outputs.tag }}" "${{ github.repository }}"
+          cp "$BUNDLE"/dmg/*.dmg "release/Got-Skills-${{ needs.resolve-release.outputs.version }}-universal.dmg"
+          node scripts/updaterFeed.mjs "$BUNDLE" release "${{ needs.resolve-release.outputs.version }}" "${{ needs.resolve-release.outputs.tag }}" "${{ github.repository }}"
 
       - name: Create or update GitHub Release
-        if: steps.release.outputs.skip != 'true'
+        if: inputs.dry_run != true
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.release.outputs.tag }}
-          name: Got Skills ${{ steps.release.outputs.tag }}
+          tag_name: ${{ needs.resolve-release.outputs.tag }}
+          name: Got Skills ${{ needs.resolve-release.outputs.tag }}
           generate_release_notes: true
           make_latest: true
           files: |
