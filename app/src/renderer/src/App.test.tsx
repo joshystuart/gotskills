@@ -1,5 +1,13 @@
 /** @vitest-environment jsdom */
-import { act, fireEvent, isInaccessible, render, screen, within } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  isInaccessible,
+  render,
+  screen,
+  within,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { AppUpdateBanner } from './AppUpdateBanner'
@@ -2447,7 +2455,7 @@ describe('Settings registry list', () => {
     expect(api.updateRegistry).not.toHaveBeenCalled()
   })
 
-  it('saves a picked Registry Colour once when the picker closes and shows it everywhere', async () => {
+  it('saves a picked Registry Colour once when the wheel settles and shows it everywhere', async () => {
     const registries = [registryRecord()]
     const skills = [
       skill({ id: 'alpha', name: 'Alpha', description: 'First skill', registryId: 'default' }),
@@ -2467,12 +2475,15 @@ describe('Settings registry list', () => {
 
     fireEvent.input(input, { target: { value: '#112233' } })
     fireEvent.input(input, { target: { value: '#445566' } })
-    await act(async () => {
-      fireEvent.change(input, { target: { value: '#445566' } })
-    })
+    fireEvent.change(input, { target: { value: '#445566' } })
 
-    expect(api.updateRegistry).toHaveBeenCalledOnce()
+    await waitFor(() => expect(api.updateRegistry).toHaveBeenCalledOnce())
     expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', colour: '#445566' })
+    await waitFor(() =>
+      expect(registryButton('anthropics/skills').querySelector('.dot')).toHaveStyle({
+        background: '#445566',
+      })
+    )
     expect(vi.mocked(api.listRegistries).mock.calls.length).toBeGreaterThan(registryReads)
     expect(
       screen
@@ -2488,6 +2499,55 @@ describe('Settings registry list', () => {
     ).toHaveStyle({ background: '#445566' })
   })
 
+  it('keeps the Registry row mounted and enabled while dragging on the colour wheel', async () => {
+    const registries = [registryRecord()]
+    const api = fakeApi(syncStatus(), [], {
+      listRegistries: vi.fn().mockImplementation(async () => registries),
+      updateRegistry: vi.fn().mockImplementation(async (req) => {
+        registries[0] = registryRecord({ colour: req.colour })
+        return registries[0]
+      }),
+    })
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    const input = screen.getByLabelText('Colour for anthropics/skills')
+    const sync = screen.getByRole('button', { name: 'Sync anthropics/skills' })
+
+    for (const value of ['#111111', '#222222', '#333333']) {
+      fireEvent.input(input, { target: { value } })
+      fireEvent.change(input, { target: { value } })
+      await act(async () => {})
+      expect(sync).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Sync all' })).toBeEnabled()
+    }
+    expect(api.updateRegistry).not.toHaveBeenCalled()
+
+    await waitFor(() => expect(api.updateRegistry).toHaveBeenCalledOnce())
+    expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', colour: '#333333' })
+    await waitFor(() => expect(registries[0].colour).toBe('#333333'))
+    await act(async () => {})
+    expect(sync).toBeEnabled()
+    expect(sync).toBeInTheDocument()
+    expect(screen.getByLabelText('Colour for anthropics/skills')).toBe(input)
+  })
+
+  it('saves a pending Registry Colour when leaving the row before the wheel settles', async () => {
+    const api = fakeApi(syncStatus())
+    render(<App api={api} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    const input = screen.getByLabelText('Colour for anthropics/skills')
+
+    fireEvent.change(input, { target: { value: '#112233' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit anthropics/skills' }))
+
+    await waitFor(() =>
+      expect(api.updateRegistry).toHaveBeenCalledWith({ id: 'default', colour: '#112233' })
+    )
+    expect(api.updateRegistry).toHaveBeenCalledOnce()
+  })
+
   it('shows a rejected Registry Colour save and puts the saved colour back', async () => {
     const api = fakeApi(syncStatus(), [], {
       listRegistries: vi.fn().mockResolvedValue([registryRecord({ colour: '#aabbcc' })]),
@@ -2499,12 +2559,10 @@ describe('Settings registry list', () => {
     const input = screen.getByLabelText('Colour for anthropics/skills')
 
     fireEvent.input(input, { target: { value: '#112233' } })
-    await act(async () => {
-      fireEvent.change(input, { target: { value: '#112233' } })
-    })
+    fireEvent.change(input, { target: { value: '#112233' } })
 
     expect(
-      within(screen.getByRole('region', { name: 'Registries' })).getByRole('alert')
+      await within(screen.getByRole('region', { name: 'Registries' })).findByRole('alert')
     ).toHaveTextContent('Colour must be #rrggbb hex')
     expect(
       screen
