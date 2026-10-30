@@ -24,6 +24,7 @@ import { useAppUpdate } from './useAppUpdate'
 import { AutoUpdateNotice } from './AutoUpdateNotice'
 import { CatalogueList } from './CatalogueList'
 import { ConfirmDialog } from './ConfirmDialog'
+import type { AddRegistrySource } from './AddRegistryRow'
 import { SettingsView } from './SettingsView'
 import { Sidebar } from './Sidebar'
 import { SkillDetailPanel } from './SkillDetailPanel'
@@ -78,6 +79,7 @@ export function App({ api }: AppProps): JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchFocusRequest, setSearchFocusRequest] = useState(0)
   const [registries, setRegistries] = useState<RegistryRecord[]>([])
+  const [addSource, setAddSource] = useState<AddRegistrySource | null>(null)
   const [addUrl, setAddUrl] = useState('')
   const [addBranch, setAddBranch] = useState('')
   const [addBusy, setAddBusy] = useState(false)
@@ -243,9 +245,7 @@ export function App({ api }: AppProps): JSX.Element {
   const openSettings = useCallback((): void => {
     setEditingId(null)
     setBranchWarn(false)
-    setAddUrl('')
-    setAddBranch('')
-    setAddError(null)
+    resetAdd(null)
     setRegistryError(null)
     setSettingsOpen(true)
   }, [])
@@ -355,14 +355,20 @@ export function App({ api }: AppProps): JSX.Element {
     try {
       const branch = addBranch.trim()
       await api.addRegistry(branch ? { url, branch } : { url })
-      setAddUrl('')
-      setAddBranch('')
+      resetAdd(null)
       await refreshAfterRegistryChange()
     } catch (err) {
       setAddError(errorMessage(err))
     } finally {
       setAddBusy(false)
     }
+  }
+
+  function resetAdd(source: AddRegistrySource | null, url = ''): void {
+    setAddSource(source)
+    setAddUrl(url)
+    setAddBranch('')
+    setAddError(null)
   }
 
   function startEdit(registry: RegistryRecord): void {
@@ -826,12 +832,16 @@ export function App({ api }: AppProps): JSX.Element {
               onCommit: commitEdit,
             }}
             addForm={{
+              source: addSource,
               url: addUrl,
               branch: addBranch,
               busy: addBusy,
               error: addError,
+              onStartGit: () => resetAdd('git'),
+              onChooseFolder: () =>
+                void chooseRegistryFolder((folder) => resetAdd('folder', folder), setAddError),
+              onCancel: () => resetAdd(null),
               onUrlChange: setAddUrl,
-              onChooseFolder: () => void chooseRegistryFolder(setAddUrl, setAddError),
               onBranchChange: setAddBranch,
               onSubmit: onAddRegistry,
             }}
