@@ -2,6 +2,8 @@
 
 Issues and specs for this repo live as markdown files in `.scratch/`.
 
+Plans made with the xf skills use a different layout in the same folder (`GRILL.md`, `SPEC.md`, `tickets/`). For those, follow `docs/agents/xf.md`, not this file.
+
 ## Conventions
 
 - One feature per directory: `.scratch/<feature-slug>/`
