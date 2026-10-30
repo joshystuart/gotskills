@@ -22,6 +22,8 @@ Run `npm run check` from the repository root before handing work back to the use
 
 ## Commits
 
+Use Conventional Commits for commit messages: `<type>[optional scope]: <description>` (for example, `feat: add skill search`, `fix(app): handle missing config`, or `docs: update agent instructions`). Add `!` before the colon for breaking changes, or describe them in a `BREAKING CHANGE:` footer.
+
 Don't add author or attribution lines to commit messages, such as `Co-Authored-By` trailers or Claude or Codex names.
 
 ## Releases
