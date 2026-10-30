@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use rusqlite::{named_params, Connection};
 
-use crate::db::{transaction, SyncMarkerStatus};
+use crate::db::SyncMarkerStatus;
 use crate::registries::{get_marker, upsert_marker_success};
 use crate::types::RegistrySource;
 
@@ -52,7 +52,8 @@ pub fn write_scan_to_db(
         SyncMarkerStatus::Ok
     };
 
-    transaction(conn, || -> Result<(), rusqlite::Error> {
+    let transaction = conn.unchecked_transaction()?;
+    {
         let mut upsert_skill = conn.prepare(
             "INSERT INTO skill (
                registry_id, folder_name, name, description, skill_path,
@@ -106,10 +107,9 @@ pub fn write_scan_to_db(
                 named_params! { ":registry_id": registry_id, ":folders": folders },
             )?;
         }
-        Ok(())
-    })?;
-
-    upsert_marker_success(conn, registry_id, revision, &at, status)?;
+        upsert_marker_success(conn, registry_id, revision, &at, status)?;
+    }
+    transaction.commit()?;
 
     Ok(SyncWriteResult {
         revision: revision.to_string(),
@@ -127,37 +127,41 @@ pub fn sync_registry(
     config: &SyncRegistryConfig,
 ) -> Result<SyncWriteResult, GitError> {
     if config.source == RegistrySource::Local {
-        let snapshot =
-            super::local::snapshot_local(std::path::Path::new(&config.url), &config.mirror_path)?;
-        let marker = get_marker(conn, &config.registry_id)
-            .map_err(|error| GitError::new(error.to_string()))?;
-        if let Some(marker) = marker.filter(|marker| {
-            !marker.stale
-                && marker.last_sync_revision.as_deref() == Some(&snapshot.revision)
-                && matches!(
-                    marker.status,
-                    SyncMarkerStatus::Ok | SyncMarkerStatus::Empty
+        return super::local::snapshot_local_with(
+            std::path::Path::new(&config.url),
+            &config.mirror_path,
+            |snapshot| {
+                let marker = get_marker(conn, &config.registry_id)
+                    .map_err(|error| GitError::new(error.to_string()))?;
+                if let Some(marker) = marker.filter(|marker| {
+                    !marker.stale
+                        && marker.last_sync_revision.as_deref() == Some(&snapshot.revision)
+                        && matches!(
+                            marker.status,
+                            SyncMarkerStatus::Ok | SyncMarkerStatus::Empty
+                        )
+                }) {
+                    upsert_marker_success(
+                        conn,
+                        &config.registry_id,
+                        &snapshot.revision,
+                        &now(),
+                        marker.status,
+                    )?;
+                    return Ok(SyncWriteResult {
+                        revision: snapshot.revision,
+                        visible_skill_count: snapshot.skills.len() as u32,
+                        status: marker.status,
+                        skipped: true,
+                    });
+                }
+                write_scan_to_db(
+                    conn,
+                    &config.registry_id,
+                    &snapshot.revision,
+                    &snapshot.skills,
                 )
-        }) {
-            upsert_marker_success(
-                conn,
-                &config.registry_id,
-                &snapshot.revision,
-                &now(),
-                marker.status,
-            )?;
-            return Ok(SyncWriteResult {
-                revision: snapshot.revision,
-                visible_skill_count: snapshot.skills.len() as u32,
-                status: marker.status,
-                skipped: true,
-            });
-        }
-        return write_scan_to_db(
-            conn,
-            &config.registry_id,
-            &snapshot.revision,
-            &snapshot.skills,
+            },
         );
     }
     let marker = get_marker(conn, &config.registry_id)
@@ -733,8 +737,7 @@ mod tests {
 mod local_sync_tests {
     use super::*;
 
-    #[test]
-    fn unchanged_local_sync_skips_without_git_and_preserves_catalogue_dates() {
+    fn fixture() -> (tempfile::TempDir, Connection, SyncRegistryConfig) {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -765,6 +768,13 @@ mod local_sync_tests {
             branch: String::new(),
             mirror_path: root.path().join("mirror"),
         };
+        (root, conn, config)
+    }
+
+    #[test]
+    fn unchanged_local_sync_skips_without_git_and_preserves_catalogue_dates() {
+        let (_root, conn, config) = fixture();
+        let source = std::path::Path::new(&config.url);
         let first = sync_registry(&conn, &config).unwrap();
         conn.execute("UPDATE skill SET last_seen_at = 'sentinel'", [])
             .unwrap();
@@ -782,6 +792,122 @@ mod local_sync_tests {
                 .get::<_, String>(0))
                 .unwrap(),
             "sentinel"
+        );
+    }
+
+    #[test]
+    fn failed_catalogue_writes_restore_the_previous_local_snapshot() {
+        for failure in ["skill", "marker", "commit"] {
+            let (root, conn, config) = fixture();
+            let first = sync_registry(&conn, &config).unwrap();
+            let previous = std::fs::read(config.mirror_path.join("alpha/SKILL.md")).unwrap();
+            let previous_hash: String = conn
+                .query_row("SELECT head_content_hash FROM skill", [], |row| row.get(0))
+                .unwrap();
+            let source = std::path::Path::new(&config.url);
+            std::fs::remove_dir_all(source.join("alpha")).unwrap();
+            crate::mirror::test_support::write_skill(
+                source,
+                "beta",
+                Some("name: beta\ndescription: Changed"),
+            );
+            let injection = match failure {
+                "skill" => {
+                    "CREATE TRIGGER fail_sync BEFORE INSERT ON skill
+                            BEGIN SELECT RAISE(ABORT, 'skill write failed'); END"
+                }
+                "marker" => {
+                    "CREATE TRIGGER fail_sync BEFORE INSERT ON registry_sync_marker
+                             BEGIN SELECT RAISE(ABORT, 'marker write failed'); END"
+                }
+                "commit" => {
+                    "CREATE TABLE commit_guard (
+                               registry_id TEXT REFERENCES registry(id)
+                               DEFERRABLE INITIALLY DEFERRED
+                             );
+                             CREATE TRIGGER fail_sync AFTER INSERT ON skill
+                             BEGIN INSERT INTO commit_guard VALUES ('missing-registry'); END"
+                }
+                _ => unreachable!(),
+            };
+            conn.execute_batch(injection).unwrap();
+
+            assert!(sync_registry(&conn, &config).is_err(), "{failure}");
+
+            assert!(conn.is_autocommit(), "{failure}");
+            assert_eq!(
+                std::fs::read(config.mirror_path.join("alpha/SKILL.md")).unwrap(),
+                previous,
+                "{failure}"
+            );
+            assert!(!config.mirror_path.join("beta").exists(), "{failure}");
+            assert_eq!(
+                conn.query_row(
+                    "SELECT folder_name, head_content_hash, soft_deleted FROM skill",
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, bool>(2)?
+                    )),
+                )
+                .unwrap(),
+                ("alpha".into(), previous_hash, false),
+                "{failure}"
+            );
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM skill", [], |row| row.get::<_, u32>(0))
+                    .unwrap(),
+                1,
+                "{failure}"
+            );
+            assert_eq!(
+                get_marker(&conn, &config.registry_id)
+                    .unwrap()
+                    .unwrap()
+                    .last_sync_revision,
+                Some(first.revision.clone()),
+                "{failure}"
+            );
+            assert!(!std::fs::read_dir(root.path()).unwrap().any(|entry| {
+                let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+                name.starts_with("mirror.snapshot-") || name.starts_with("mirror.backup-")
+            }));
+
+            conn.execute_batch("DROP TRIGGER fail_sync").unwrap();
+            let recovered = sync_registry(&conn, &config).unwrap();
+            assert_ne!(recovered.revision, first.revision, "{failure}");
+            assert!(!config.mirror_path.join("alpha").exists(), "{failure}");
+            assert!(
+                config.mirror_path.join("beta/SKILL.md").exists(),
+                "{failure}"
+            );
+        }
+    }
+
+    #[test]
+    fn failed_first_catalogue_write_does_not_publish_a_local_snapshot() {
+        let (_root, conn, config) = fixture();
+        conn.execute_batch(
+            "CREATE TRIGGER fail_sync BEFORE INSERT ON registry_sync_marker
+             BEGIN SELECT RAISE(ABORT, 'marker write failed'); END",
+        )
+        .unwrap();
+
+        assert!(sync_registry(&conn, &config).is_err());
+
+        assert!(!config.mirror_path.exists());
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM skill", [], |row| row.get::<_, u32>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            get_marker(&conn, &config.registry_id)
+                .unwrap()
+                .unwrap()
+                .last_sync_revision,
+            None
         );
     }
 }

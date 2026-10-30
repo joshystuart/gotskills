@@ -2229,6 +2229,22 @@ describe('Settings registry list', () => {
     expect(screen.getByRole('button', { name: '+ Add registry' })).toBeInTheDocument()
   })
 
+  it('closes the add row when Escape is pressed in the expanded Branch field', async () => {
+    render(<App api={fakeApi(syncStatus())} />)
+    await screen.findByText('Synced')
+    await openSettings()
+    startGitAdd()
+    fireEvent.click(screen.getByRole('button', { name: /Branch: default/ }))
+
+    const branch = screen.getByLabelText('Repository branch')
+    branch.focus()
+    fireEvent.keyDown(branch, { key: 'Escape' })
+
+    expect(screen.queryByRole('form', { name: 'Add registry' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Repository branch')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '+ Add registry' })).toBeInTheDocument()
+  })
+
   it('hides branch controls for folder paths typed into the Git row and keeps them for Git URLs', async () => {
     render(<App api={fakeApi(syncStatus())} />)
     await screen.findByText('Synced')

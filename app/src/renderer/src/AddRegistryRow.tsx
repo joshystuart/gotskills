@@ -106,15 +106,13 @@ export function AddRegistryRow({ form }: { form: AddRegistryForm }): JSX.Element
   if (form.source === null) return <AddRegistryMenu form={form} />
 
   return (
-    <li className="add-registry-row">
-      <form
-        className="add-registry-form"
-        aria-label="Add registry"
-        onSubmit={form.onSubmit}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') form.onCancel()
-        }}
-      >
+    <li
+      className="add-registry-row"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') form.onCancel()
+      }}
+    >
+      <form className="add-registry-form" aria-label="Add registry" onSubmit={form.onSubmit}>
         {form.source === 'folder' ? (
           <span className="add-folder mono" title={form.url}>
             {form.url}

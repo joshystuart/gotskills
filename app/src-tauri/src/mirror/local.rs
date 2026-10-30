@@ -96,12 +96,24 @@ fn hash_tree(root: &Path, directory: &Path, hash: &mut Sha256) -> io::Result<Sys
 
 /// Copy discovered skills into a last-good mirror without invoking Git.
 pub fn snapshot_local(source: &Path, destination: &Path) -> Result<LocalSnapshot, SnapshotError> {
+    snapshot_local_with(source, destination, Ok)
+}
+
+/// Keep the previous mirror until the new snapshot's catalogue is persisted.
+pub(super) fn snapshot_local_with<T, E>(
+    source: &Path,
+    destination: &Path,
+    persist: impl FnOnce(LocalSnapshot) -> Result<T, E>,
+) -> Result<T, E>
+where
+    E: From<SnapshotError>,
+{
     let source_path = fs::canonicalize(source).map_err(SnapshotError::opening)?;
     let source = source_path.as_path();
     fs::read_dir(source).map_err(SnapshotError::opening)?;
     let save_failed = |message: &str| SnapshotError::SaveFailed(io::Error::other(message));
     if paths_overlap(source, destination) {
-        return Err(save_failed("Snapshot source and destination overlap"));
+        return Err(save_failed("Snapshot source and destination overlap").into());
     }
     let parent = destination
         .parent()
@@ -158,33 +170,61 @@ pub fn snapshot_local(source: &Path, destination: &Path) -> Result<LocalSnapshot
             skills,
             revision: format!("{:x}", revision.finalize()),
         };
-        replace_mirror(&staging, destination, suffix).map_err(SnapshotError::SaveFailed)?;
         Ok(snapshot)
     })();
-    if result.is_err() {
-        let _ = fs::remove_dir_all(staging);
-    }
-    result.map_err(|error| {
+    let result = result.map_err(|error| {
         if source.is_dir() {
             error
         } else {
             SnapshotError::FolderNotFound
         }
-    })
+    });
+    let result = match result {
+        Ok(snapshot) => replace_mirror(&staging, destination, suffix, || persist(snapshot)),
+        Err(error) => Err(error.into()),
+    };
+    if result.is_err() {
+        let _ = fs::remove_dir_all(staging);
+    }
+    result
 }
 
-fn replace_mirror(staging: &Path, destination: &Path, suffix: uuid::Uuid) -> io::Result<()> {
-    if !destination.exists() {
-        return fs::rename(staging, destination);
+fn replace_mirror<T, E>(
+    staging: &Path,
+    destination: &Path,
+    suffix: uuid::Uuid,
+    persist: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E>
+where
+    E: From<SnapshotError>,
+{
+    let backup = destination
+        .exists()
+        .then(|| destination.with_extension(format!("backup-{suffix}")));
+    if let Some(backup) = &backup {
+        fs::rename(destination, backup).map_err(SnapshotError::SaveFailed)?;
     }
-    let backup = destination.with_extension(format!("backup-{suffix}"));
-    fs::rename(destination, &backup)?;
     if let Err(error) = fs::rename(staging, destination) {
-        fs::rename(&backup, destination)?;
-        return Err(error);
+        if let Some(backup) = &backup {
+            fs::rename(backup, destination).map_err(SnapshotError::SaveFailed)?;
+        }
+        return Err(SnapshotError::SaveFailed(error).into());
     }
-    let _ = fs::remove_dir_all(backup);
-    Ok(())
+    match persist() {
+        Ok(value) => {
+            if let Some(backup) = backup {
+                let _ = fs::remove_dir_all(backup);
+            }
+            Ok(value)
+        }
+        Err(error) => {
+            fs::rename(destination, staging).map_err(SnapshotError::SaveFailed)?;
+            if let Some(backup) = backup {
+                fs::rename(backup, destination).map_err(SnapshotError::SaveFailed)?;
+            }
+            Err(error)
+        }
+    }
 }
 
 #[cfg(test)]
