@@ -72,8 +72,8 @@ The single skill currently installed under a folder name in one install target, 
 _Avoid_: Skill
 
 **Installation Collision**:
-The condition where an install target already contains a skill under the folder name being installed, either from another registry or from outside the app. Installation is blocked until the existing skill is removed.
-_Avoid_: Skill conflict
+The condition where an install target already contains a skill under a skill's folder name, either from another registry or from outside the app. The existing skill is replaced only when the user chooses to install over it.
+_Avoid_: Skill conflict, external install
 
 **Orphaned Installation**:
 An installed skill whose supplying registry has been removed. It remains installed and can be uninstalled, but cannot receive catalogue updates.
