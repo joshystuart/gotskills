@@ -92,6 +92,12 @@ npm ci
 npm run dev          # run with hot reload
 ```
 
+In a linked git worktree, `npm run dev` starts an isolated instance, so several
+worktrees can run the app at once. Each gets its own dev server port and keeps
+its data and a fake home in `.gotskills-dev/` at the worktree root. The primary
+checkout uses your real data and port 1420. Set `GOTSKILLS_DATA_DIR` or
+`GOTSKILLS_HOME` to override either location.
+
 From the repository root, run `npm run check` before submitting changes. It checks
 formatting, TypeScript, renderer and script tests, Rust tests, and the app size
 check's tests.

@@ -7,7 +7,7 @@ export default defineConfig({
   base: './',
   clearScreen: false,
   plugins: [react()],
-  server: { port: 1420, strictPort: true },
+  server: { port: Number(process.env.GOTSKILLS_DEV_PORT) || 1420, strictPort: true },
   build: {
     outDir: resolve(__dirname, 'out/renderer'),
     emptyOutDir: true,

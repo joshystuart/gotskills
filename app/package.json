@@ -4,7 +4,7 @@
   "description": "Got Skills \u2014 internal app store for agent skills (Phase 0 PoC)",
   "author": "Got Skills",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "node scripts/dev.mjs",
     "build": "tauri build",
     "build:release": "tauri build --bundles app,dmg,updater --config '{\"bundle\":{\"createUpdaterArtifacts\":true}}'",
     "render:dmg-background": "node scripts/render-dmg-background.mjs",
