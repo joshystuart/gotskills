@@ -5615,6 +5615,37 @@ describe('Replacing an Installation Collision', () => {
     expect(api.repair).not.toHaveBeenCalled()
   })
 
+  it('says what happens to what is in each target before replacing', async () => {
+    renderWith([
+      collidedSkill([
+        {
+          target: '~/.claude/skills',
+          state: 'other-registry',
+          occupant: { kind: 'registry', registryLabel: 'Team skills' },
+        },
+        { target: '~/.config/goose/skills', state: 'external', occupant: { kind: 'symlink' } },
+        { target: '~/.agents/skills', state: 'external', occupant: { kind: 'folder' } },
+      ]),
+    ])
+    fireEvent.click(await screen.findByText('Alpha'))
+    await screen.findByRole('region', { name: 'On this Mac' })
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Replace all' }).click()
+    })
+    const dialog = screen.getByRole('alertdialog', { name: 'Replace skill?' })
+    expect(
+      within(dialog)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual([
+      'Claude Code — replaces the copy from Team skills',
+      'Goose — link removed',
+      'Cline, Codex, Cursor, Zed — moved to the Trash',
+    ])
+    expect(within(dialog).getByRole('button', { name: 'Replace' })).toBeInTheDocument()
+  })
+
   it('keeps Install to all for empty targets only, without replacing anything', async () => {
     const api = renderWith([
       collidedSkill([

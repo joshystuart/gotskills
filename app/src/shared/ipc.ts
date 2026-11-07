@@ -71,11 +71,17 @@ export interface AutoUpdateResult {
   failed: { folderName: string; name: string; reason: string }[]
 }
 
+/** What already occupies a target with an Installation Collision. */
+export type CollisionOccupant =
+  { kind: 'symlink' } | { kind: 'folder' } | { kind: 'registry'; registryLabel: string }
+
 export interface PerTargetState {
   target: InstallTargetId
   state: ReconcileState
   /** Short provenance SHA of the installed snapshot, when installed. */
   installedVersion?: string
+  /** Present only on `external` and `other-registry` targets. */
+  occupant?: CollisionOccupant
 }
 
 export interface SkillSummary {
@@ -267,6 +273,7 @@ export interface ReconcileEntry {
   mirrorHash?: string
   disk: DiskProbe[]
   lockAgrees: boolean
+  occupant?: CollisionOccupant
 }
 
 export interface ReconcileReport {

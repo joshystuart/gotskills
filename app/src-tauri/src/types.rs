@@ -129,6 +129,18 @@ pub enum ReconcileState {
     Orphaned,
 }
 
+/// What already occupies a target with an Installation Collision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum CollisionOccupant {
+    Symlink,
+    Folder,
+    Registry {
+        #[serde(rename = "registryLabel")]
+        registry_label: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoUpdatedSkill {
@@ -161,6 +173,9 @@ pub struct PerTargetState {
     pub state: ReconcileState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
+    /// What occupies the target; only on `external` and `other-registry`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occupant: Option<CollisionOccupant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -382,6 +397,8 @@ pub struct ReconcileEntry {
     pub mirror_hash: Option<String>,
     pub disk: Vec<DiskProbe>,
     pub lock_agrees: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occupant: Option<CollisionOccupant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -665,6 +682,17 @@ mod tests {
             })
             .unwrap(),
             json!({ "theme": "system", "fontSize": "larger" })
+        );
+        assert_eq!(
+            serde_json::to_value(CollisionOccupant::Symlink).unwrap(),
+            json!({ "kind": "symlink" })
+        );
+        assert_eq!(
+            serde_json::to_value(CollisionOccupant::Registry {
+                registry_label: "Team skills".into()
+            })
+            .unwrap(),
+            json!({ "kind": "registry", "registryLabel": "Team skills" })
         );
     }
 

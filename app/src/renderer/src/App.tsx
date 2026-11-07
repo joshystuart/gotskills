@@ -36,6 +36,7 @@ import {
   isInstalledLike,
   registryDotColour,
   registryRecordLabel,
+  replaceTargetLabel,
   searchSkills,
   skillsInView,
   targetLabel,
@@ -981,7 +982,7 @@ export function App({ api }: AppProps): JSX.Element {
           </p>
           <ul className="modal-list">
             {pendingReplace.map((target) => (
-              <li key={target}>{targetLabel(targets, target)}</li>
+              <li key={target}>{replaceTargetLabel(targets, selected, target)}</li>
             ))}
           </ul>
         </ConfirmDialog>

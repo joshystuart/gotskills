@@ -1,4 +1,5 @@
 import type {
+  CollisionOccupant,
   InstallTargetId,
   InstallTargetStatus,
   ReconcileState,
@@ -229,6 +230,28 @@ export function registryDotColour(registry: {
 
 export function targetLabel(targets: InstallTargetStatus[], target: InstallTargetId): string {
   return targets.find((candidate) => candidate.id === target)?.label ?? target
+}
+
+function replaceOutcome(occupant: CollisionOccupant): string {
+  switch (occupant.kind) {
+    case 'symlink':
+      return 'link removed'
+    case 'folder':
+      return 'moved to the Trash'
+    case 'registry':
+      return `replaces the copy from ${occupant.registryLabel}`
+  }
+}
+
+/** A target's label and what replacing it does to what is there now. */
+export function replaceTargetLabel(
+  targets: InstallTargetStatus[],
+  skill: SkillSummary,
+  target: InstallTargetId
+): string {
+  const label = targetLabel(targets, target)
+  const occupant = skill.perTarget.find((entry) => entry.target === target)?.occupant
+  return occupant ? `${label} — ${replaceOutcome(occupant)}` : label
 }
 
 export interface StateLabel {
