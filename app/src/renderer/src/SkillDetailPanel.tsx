@@ -3,6 +3,7 @@ import type {
   InstallResult,
   InstallTargetId,
   InstallTargetStatus,
+  ReconcileState,
   SkillSummary,
 } from '../../shared/ipc'
 import { shortSha } from '../../shared/shortSha'
@@ -14,12 +15,15 @@ import {
   targetStateLabel,
 } from './cataloguePresentation'
 
+const COLLIDED_STATES: ReconcileState[] = ['external', 'other-registry']
+
 interface InstallActions {
   visible: boolean
   disabled: boolean
   installing: boolean
   updateTargets: InstallTargetId[]
   onInstall: (targets: InstallTargetId[]) => void
+  onReplace: (targets: InstallTargetId[]) => void
   onUpdate: (targets: InstallTargetId[]) => void
 }
 
@@ -64,6 +68,9 @@ export function SkillDetailPanel({
   const lacking = targets
     .map((target) => target.id)
     .filter((target) => targetState(skill, target) === 'not-installed')
+  const collided = targets
+    .map((target) => target.id)
+    .filter((target) => COLLIDED_STATES.includes(targetState(skill, target)))
   const mainAction =
     lacking.length > 0
       ? {
@@ -71,13 +78,19 @@ export function SkillDetailPanel({
           busy: 'Installing…',
           run: () => installActions.onInstall(lacking),
         }
-      : installActions.updateTargets.length > 0
+      : collided.length > 0
         ? {
-            idle: 'Update',
-            busy: 'Updating…',
-            run: () => installActions.onUpdate(installActions.updateTargets),
+            idle: 'Replace all',
+            busy: 'Replacing…',
+            run: () => installActions.onReplace(collided),
           }
-        : null
+        : installActions.updateTargets.length > 0
+          ? {
+              idle: 'Update',
+              busy: 'Updating…',
+              run: () => installActions.onUpdate(installActions.updateTargets),
+            }
+          : null
   const targetActions = (target: InstallTargetStatus) => {
     const state = targetState(skill, target.id)
     return [
@@ -87,6 +100,13 @@ export function SkillDetailPanel({
         shown: installActions.visible && state === 'not-installed',
         disabled: installActions.disabled,
         run: installActions.onInstall,
+      },
+      {
+        text: 'Replace',
+        label: `Replace ${target.label}`,
+        shown: installActions.visible && COLLIDED_STATES.includes(state),
+        disabled: installActions.disabled,
+        run: installActions.onReplace,
       },
       {
         text: 'Update',

@@ -1,6 +1,7 @@
 //! Install a Skill from the local mirror into targets.
 
 use std::fs;
+use std::io;
 use std::path::Path;
 
 use chrono::{SecondsFormat, Utc};
@@ -24,6 +25,14 @@ pub const INSTALLER_VERSION: &str = "1.7.0";
 
 pub const REVISION_REFUSED_MESSAGE: &str = "Catalogue changed since you selected this skill. Refresh and re-select to install the current version.";
 
+/// Moves a path to the system Trash.
+pub type TrashFn<'a> = &'a dyn Fn(&Path) -> io::Result<()>;
+
+/// Move `path` to the system Trash.
+pub fn move_to_trash(path: &Path) -> io::Result<()> {
+    trash::delete(path).map_err(|error| io::Error::other(error.to_string()))
+}
+
 /// Everything an install needs besides the request.
 pub struct InstallDeps<'a> {
     pub conn: &'a Connection,
@@ -32,6 +41,8 @@ pub struct InstallDeps<'a> {
     pub environment: &'a Environment,
     /// Current mirror HEAD SHA (the caller validates it under the mirror lock).
     pub current_revision: &'a str,
+    /// Where a replaced real folder goes.
+    pub trash: TrashFn<'a>,
 }
 
 struct SkillHead {
@@ -66,7 +77,15 @@ fn read_skill_head(deps: &InstallDeps, folder_name: &str) -> AppResult<SkillHead
     }
 }
 
-fn assert_no_collision(deps: &InstallDeps, folder_name: &str, target: &str) -> AppResult<()> {
+fn assert_no_collision(
+    deps: &InstallDeps,
+    request: &InstallRequest,
+    target: &str,
+) -> AppResult<()> {
+    if is_replacing(request, target) {
+        return Ok(());
+    }
+    let folder_name = request.folder_name.as_str();
     let occupant = read_occupancy(deps.conn, target, folder_name)?;
     let collision = |message: String, occupant: Occupant| AppError::InstallationCollision {
         message,
@@ -91,11 +110,29 @@ fn assert_no_collision(deps: &InstallDeps, folder_name: &str, target: &str) -> A
     }
 }
 
+fn is_replacing(request: &InstallRequest, target: &str) -> bool {
+    request
+        .replace_targets
+        .as_ref()
+        .is_some_and(|listed| listed.iter().any(|t| t == target))
+}
+
+fn is_real_external_entry(
+    deps: &InstallDeps,
+    path: &Path,
+    target: &str,
+    folder_name: &str,
+) -> bool {
+    let recorded = matches!(read_occupancy(deps.conn, target, folder_name), Ok(Some(_)));
+    !recorded && fs::symlink_metadata(path).is_ok_and(|m| !m.file_type().is_symlink())
+}
+
 fn install_one_target(
     deps: &InstallDeps,
     skill_dir: &Path,
     folder_name: &str,
     target: &str,
+    replacing: bool,
 ) -> TargetResult {
     let path = target_install_path(&deps.environment.home, target, folder_name);
     let failed = |error: String, present: bool| TargetResult {
@@ -109,6 +146,11 @@ fn install_one_target(
         },
         error: Some(redact_error(&error)),
     };
+    if replacing && is_real_external_entry(deps, &path, target, folder_name) {
+        if let Err(error) = (deps.trash)(&path) {
+            return failed(error.to_string(), true);
+        }
+    }
     match install_copy(skill_dir, &path) {
         Ok(_) if path.exists() => TargetResult {
             target: target.to_string(),
@@ -136,7 +178,7 @@ pub fn install_skill(deps: &InstallDeps, request: &InstallRequest) -> AppResult<
     }
     let head = read_skill_head(deps, &request.folder_name)?;
     for target in &request.targets {
-        assert_no_collision(deps, &request.folder_name, target)?;
+        assert_no_collision(deps, request, target)?;
     }
 
     let skill_dir = match &head.skill_path {
@@ -158,7 +200,13 @@ pub fn install_skill(deps: &InstallDeps, request: &InstallRequest) -> AppResult<
     let installed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let mut per_target = Vec::new();
     for target in &request.targets {
-        let result = install_one_target(deps, &skill_dir, &request.folder_name, target);
+        let result = install_one_target(
+            deps,
+            &skill_dir,
+            &request.folder_name,
+            target,
+            is_replacing(request, target),
+        );
         if result.outcome == TargetOutcome::Installed {
             upsert_install_record(
                 deps.conn,
@@ -196,26 +244,47 @@ mod tests {
     use super::*;
     use crate::installer::records::{read_install_records, InstallRecordFilter};
     use crate::installer::test_support::*;
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    use std::rc::Rc;
+
+    type TrashStep = dyn Fn(&Path) -> io::Result<()>;
 
     struct Fixture {
         home: tempfile::TempDir,
         mirror: tempfile::TempDir,
         conn: Connection,
         env: Environment,
+        trashed: Rc<RefCell<Vec<PathBuf>>>,
+        trash: Box<TrashStep>,
     }
 
     fn fixture() -> Fixture {
+        recording_fixture(false)
+    }
+
+    fn recording_fixture(trash_fails: bool) -> Fixture {
         let home = tempfile::tempdir().unwrap();
         let mirror = tempfile::tempdir().unwrap();
         let conn = database();
         add_skill(&conn, REGISTRY, "alpha", "h1", false);
         write_mirror_skill(mirror.path(), "alpha", "alpha body");
         let env = Environment::fake_home(home.path());
+        let trashed = Rc::new(RefCell::new(Vec::new()));
+        let log = Rc::clone(&trashed);
         Fixture {
             home,
             mirror,
             conn,
             env,
+            trashed,
+            trash: Box::new(move |path| {
+                if trash_fails {
+                    return Err(io::Error::other("the Trash is full"));
+                }
+                log.borrow_mut().push(path.to_path_buf());
+                Ok(())
+            }),
         }
     }
 
@@ -227,6 +296,14 @@ mod tests {
                 mirror_path: self.mirror.path(),
                 environment: &self.env,
                 current_revision: "rev1",
+                trash: &self.trash,
+            }
+        }
+
+        fn replacing(&self, targets: &[&str], replace: &[&str]) -> InstallRequest {
+            InstallRequest {
+                replace_targets: Some(replace.iter().map(|t| t.to_string()).collect()),
+                ..self.request(targets)
             }
         }
 
@@ -237,6 +314,7 @@ mod tests {
                 targets: targets.iter().map(|t| t.to_string()).collect(),
                 mirror_revision: "rev1".into(),
                 acknowledge_stale: None,
+                replace_targets: None,
             }
         }
     }
@@ -456,5 +534,134 @@ mod tests {
         let records = read_install_records(&f.conn, &InstallRecordFilter::default()).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].target, "~/.claude/skills");
+    }
+
+    const CLAUDE: &str = "~/.claude/skills";
+    const SHARED: &str = "~/.agents/skills";
+
+    fn external_folder(f: &Fixture, dir: &str, body: &str) -> PathBuf {
+        let existing = f.home.path().join(dir).join("alpha");
+        fs::create_dir_all(&existing).unwrap();
+        fs::write(existing.join("SKILL.md"), body).unwrap();
+        existing
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_listed_external_symlink_is_replaced_and_its_folder_survives() {
+        let f = fixture();
+        let own_skills = f.home.path().join("my-skills/alpha");
+        fs::create_dir_all(&own_skills).unwrap();
+        fs::write(own_skills.join("SKILL.md"), "my own work").unwrap();
+        let installed = f.home.path().join(".claude/skills/alpha");
+        fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&own_skills, &installed).unwrap();
+
+        let result = install_skill(&f.deps(), &f.replacing(&[CLAUDE], &[CLAUDE])).unwrap();
+
+        assert_eq!(result.per_target[0].outcome, TargetOutcome::Installed);
+        assert!(fs::symlink_metadata(&installed).unwrap().is_dir());
+        assert_eq!(
+            fs::read_to_string(installed.join("SKILL.md")).unwrap(),
+            "alpha body"
+        );
+        assert_eq!(
+            fs::read_to_string(own_skills.join("SKILL.md")).unwrap(),
+            "my own work"
+        );
+        assert!(f.trashed.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_listed_external_folder_goes_to_the_trash_and_is_recorded_as_installed() {
+        let f = fixture();
+        let existing = external_folder(&f, ".claude/skills", "outside this app");
+
+        let result = install_skill(&f.deps(), &f.replacing(&[CLAUDE], &[CLAUDE])).unwrap();
+
+        assert_eq!(result.per_target[0].outcome, TargetOutcome::Installed);
+        assert_eq!(*f.trashed.borrow(), vec![existing.clone()]);
+        assert_eq!(
+            fs::read_to_string(existing.join("SKILL.md")).unwrap(),
+            "alpha body"
+        );
+        let records = read_install_records(&f.conn, &InstallRecordFilter::default()).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].registry_id, REGISTRY);
+        assert_eq!(records[0].target, CLAUDE);
+    }
+
+    #[test]
+    fn an_unlisted_collision_refuses_the_whole_request_and_writes_nothing() {
+        let f = fixture();
+        let claude = external_folder(&f, ".claude/skills", "claude outside");
+        external_folder(&f, ".agents/skills", "shared outside");
+
+        let error = install_skill(
+            &f.deps(),
+            &f.replacing(&[CLAUDE, SHARED, "~/.cursor/skills"], &[CLAUDE]),
+        )
+        .unwrap_err();
+
+        match &error {
+            AppError::InstallationCollision { target, .. } => assert_eq!(target, SHARED),
+            other => panic!("{other:?}"),
+        }
+        assert!(f.trashed.borrow().is_empty());
+        assert_eq!(
+            fs::read_to_string(claude.join("SKILL.md")).unwrap(),
+            "claude outside"
+        );
+        assert!(!f.home.path().join(".cursor/skills/alpha").exists());
+        assert!(
+            read_install_records(&f.conn, &InstallRecordFilter::default())
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn replacing_another_registrys_install_deletes_it_without_the_trash_and_takes_the_record() {
+        let f = fixture();
+        add_registry(&f.conn, "reg-b", true, false);
+        let old = external_folder(&f, ".claude/skills", "from registry b");
+        fs::write(old.join("old.txt"), "old").unwrap();
+        upsert_install_record(
+            &f.conn,
+            &crate::installer::records::fixtures::record(CLAUDE, "alpha", "reg-b"),
+        )
+        .unwrap();
+
+        let result = install_skill(&f.deps(), &f.replacing(&[CLAUDE], &[CLAUDE])).unwrap();
+
+        assert_eq!(result.per_target[0].outcome, TargetOutcome::Installed);
+        assert!(f.trashed.borrow().is_empty());
+        assert!(!old.join("old.txt").exists());
+        let records = read_install_records(&f.conn, &InstallRecordFilter::default()).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].registry_id, REGISTRY);
+    }
+
+    #[test]
+    fn a_failing_trash_step_fails_only_that_target_and_keeps_its_folder() {
+        let f = recording_fixture(true);
+        let existing = external_folder(&f, ".claude/skills", "outside this app");
+
+        let result = install_skill(&f.deps(), &f.replacing(&[CLAUDE, SHARED], &[CLAUDE])).unwrap();
+
+        assert_eq!(result.per_target[0].outcome, TargetOutcome::Failed);
+        assert!(result.per_target[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("the Trash is full"));
+        assert_eq!(
+            fs::read_to_string(existing.join("SKILL.md")).unwrap(),
+            "outside this app"
+        );
+        assert_eq!(result.per_target[1].outcome, TargetOutcome::Installed);
+        let records = read_install_records(&f.conn, &InstallRecordFilter::default()).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].target, SHARED);
     }
 }

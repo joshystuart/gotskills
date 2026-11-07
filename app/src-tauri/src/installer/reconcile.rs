@@ -287,6 +287,7 @@ mod tests {
                 mirror_path: self.mirror.path(),
                 environment: &self.env,
                 current_revision: "rev",
+                trash: &|_| Ok(()),
             };
             let request = InstallRequest {
                 registry_id: REGISTRY.into(),
@@ -294,6 +295,7 @@ mod tests {
                 targets: targets.iter().map(|t| t.to_string()).collect(),
                 mirror_revision: "rev".into(),
                 acknowledge_stale: None,
+                replace_targets: None,
             };
             install_skill(&deps, &request).unwrap();
         }
@@ -426,6 +428,34 @@ mod tests {
         add_registry(&f.conn, "reg-b", true, false);
         upsert_install_record(&f.conn, &record(CLAUDE, "alpha", "reg-b")).unwrap();
         assert_eq!(f.state(CLAUDE), ReconcileState::OtherRegistry);
+    }
+
+    #[test]
+    fn replacing_another_registrys_install_makes_it_installed_here() {
+        let f = fixture(&["claude-code"]);
+        add_registry(&f.conn, "reg-b", true, false);
+        upsert_install_record(&f.conn, &record(CLAUDE, "alpha", "reg-b")).unwrap();
+        fs::create_dir_all(f.skill_dir(".claude/skills")).unwrap();
+        let deps = InstallDeps {
+            conn: &f.conn,
+            registry_id: REGISTRY,
+            mirror_path: f.mirror.path(),
+            environment: &f.env,
+            current_revision: "rev",
+            trash: &|_| Ok(()),
+        };
+        let request = InstallRequest {
+            registry_id: REGISTRY.into(),
+            folder_name: "alpha".into(),
+            targets: vec![CLAUDE.into()],
+            mirror_revision: "rev".into(),
+            acknowledge_stale: None,
+            replace_targets: Some(vec![CLAUDE.into()]),
+        };
+
+        install_skill(&deps, &request).unwrap();
+
+        assert_eq!(f.state(CLAUDE), ReconcileState::Installed);
     }
 
     #[cfg(unix)]

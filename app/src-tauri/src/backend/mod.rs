@@ -28,10 +28,10 @@ use crate::db::{open_database, SyncMarkerStatus};
 use crate::env::{DataPaths, Environment};
 use crate::error::{AppError, AppResult};
 use crate::installer::{
-    convert_symlink_installs, detect_install_targets, install_skill, read_install_records,
-    reconcile, redact_error, supported_agents, target_install_path, telemetry_targets,
-    uninstall_skill, AgentInfo, InstallDeps, InstallRecordFilter, MirrorMutex, ReconcileDeps,
-    UninstallDeps, REVISION_REFUSED_MESSAGE,
+    convert_symlink_installs, detect_install_targets, install_skill, move_to_trash,
+    read_install_records, reconcile, redact_error, supported_agents, target_install_path,
+    telemetry_targets, uninstall_skill, AgentInfo, InstallDeps, InstallRecordFilter, MirrorMutex,
+    ReconcileDeps, UninstallDeps, REVISION_REFUSED_MESSAGE,
 };
 use crate::mirror::catalogue::{
     aggregate_sync_status, read_catalogue, record_sync_failure, registry_sync_status_from_marker,
@@ -571,6 +571,7 @@ impl Backend {
                 targets,
                 mirror_revision: mirror_revision.clone(),
                 acknowledge_stale: None,
+                replace_targets: None,
             };
             match self.run_install_operation(&request, TelemetryAction::Update, true) {
                 Ok(None) => {}
@@ -874,6 +875,7 @@ impl Backend {
                     mirror_path: &mirror_path,
                     environment: &self.environment,
                     current_revision: &current_revision,
+                    trash: &move_to_trash,
                 },
                 &request,
             )?;

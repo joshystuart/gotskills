@@ -278,6 +278,8 @@ pub struct InstallRequest {
     pub mirror_revision: String,
     #[serde(default)]
     pub acknowledge_stale: Option<bool>,
+    #[serde(default)]
+    pub replace_targets: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -631,6 +633,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(request.acknowledge_stale, None);
+        assert_eq!(request.replace_targets, None);
         let update: UpdateRegistryRequest =
             serde_json::from_value(json!({ "id": "r", "autoUpdate": true })).unwrap();
         assert_eq!(update.auto_update, Some(true));

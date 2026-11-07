@@ -117,6 +117,7 @@ fn install_request(registry: &RegistryRecord, folder: &str, targets: &[&str]) ->
         targets: targets.iter().map(|t| t.to_string()).collect(),
         mirror_revision: registry.sync_status.revision.clone().unwrap(),
         acknowledge_stale: None,
+        replace_targets: None,
     }
 }
 

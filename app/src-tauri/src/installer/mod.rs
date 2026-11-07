@@ -21,7 +21,9 @@ mod test_support;
 pub use agents::{AgentDirectory, AgentInfo};
 pub use convert::convert_symlink_installs;
 pub use errors::redact_error;
-pub use install::{install_skill, InstallDeps, INSTALLER_VERSION, REVISION_REFUSED_MESSAGE};
+pub use install::{
+    install_skill, move_to_trash, InstallDeps, TrashFn, INSTALLER_VERSION, REVISION_REFUSED_MESSAGE,
+};
 pub use mutex::MirrorMutex;
 pub use reconcile::{lock_agrees, per_target_from_reconcile, reconcile, ReconcileDeps};
 pub use records::{

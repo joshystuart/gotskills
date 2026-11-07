@@ -1833,6 +1833,143 @@ describe('Catalogue table', () => {
     })
   })
 
+  describe('replacing a collided target', () => {
+    const installResult: InstallResult = {
+      registryId: REG,
+      folderName: 'alpha',
+      skillId: `${REG}/alpha`,
+      mirrorRevision: 'deadbeef',
+      contentHash: 'hash',
+      provenanceSha: 'deadbeef',
+      cliVersion: '1.7.0',
+      perTarget: [],
+      installedAt: new Date().toISOString(),
+    }
+
+    function replaceApi(
+      perTarget: SkillSummary['perTarget'],
+      overrides: Partial<SkillSummary> = {}
+    ): RendererApi {
+      return fakeApi(
+        syncStatus({ registries: [reg()] }),
+        [
+          skill({
+            id: 'alpha',
+            name: 'Alpha',
+            description: 'First skill',
+            perTarget,
+            ...overrides,
+          }),
+        ],
+        {
+          install: vi.fn().mockResolvedValue(installResult),
+          detectTargets: vi
+            .fn()
+            .mockResolvedValue(detection([CLAUDE_CODE_TARGET, GOOSE_TARGET, WIDE_SHARED_TARGET])),
+        }
+      )
+    }
+
+    it('offers Replace only on external and other-registry targets, beside Install to all', async () => {
+      const api = replaceApi([
+        { target: '~/.claude/skills', state: 'external' },
+        { target: '~/.config/goose/skills', state: 'other-registry' },
+        { target: '~/.agents/skills', state: 'not-installed' },
+      ])
+      render(<App api={api} />)
+      fireEvent.click(await screen.findByText('Alpha'))
+
+      const onThisMac = await screen.findByRole('region', { name: 'On this Mac' })
+      expect(within(onThisMac).getByRole('button', { name: 'Replace Claude Code' })).toBeVisible()
+      expect(within(onThisMac).getByRole('button', { name: 'Replace Goose' })).toBeVisible()
+      expect(
+        within(onThisMac).queryByRole('button', { name: /Replace Cline/ })
+      ).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Replace all' })).not.toBeInTheDocument()
+
+      await act(async () => {
+        screen.getByRole('button', { name: 'Install to all' }).click()
+      })
+      expect(api.install).toHaveBeenCalledTimes(1)
+      const sent = vi.mocked(api.install).mock.calls[0][0]
+      expect(sent.targets).toEqual(['~/.agents/skills'])
+      expect(sent.replaceTargets).toBeUndefined()
+    })
+
+    it('reads Replace all when no target is empty and replaces every collided target after confirming', async () => {
+      const api = replaceApi([
+        { target: '~/.claude/skills', state: 'external' },
+        { target: '~/.config/goose/skills', state: 'other-registry' },
+        { target: '~/.agents/skills', state: 'installed', installedVersion: 'deadbee' },
+      ])
+      render(<App api={api} />)
+      fireEvent.click(await screen.findByText('Alpha'))
+
+      expect(screen.queryByRole('button', { name: 'Install to all' })).not.toBeInTheDocument()
+      fireEvent.click(await screen.findByRole('button', { name: 'Replace all' }))
+
+      const dialog = await screen.findByRole('alertdialog')
+      expect(within(dialog).getByText(/Claude Code/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/Goose/)).toBeInTheDocument()
+      expect(within(dialog).queryByText(/Cline/)).not.toBeInTheDocument()
+      expect(api.install).not.toHaveBeenCalled()
+
+      await act(async () => {
+        within(dialog).getByRole('button', { name: 'Replace' }).click()
+      })
+      expect(api.install).toHaveBeenCalledTimes(1)
+      expect(api.install).toHaveBeenLastCalledWith({
+        registryId: REG,
+        folderName: 'alpha',
+        mirrorRevision: 'deadbeef',
+        targets: ['~/.claude/skills', '~/.config/goose/skills'],
+        replaceTargets: ['~/.claude/skills', '~/.config/goose/skills'],
+      })
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    })
+
+    it('replaces a single target from its own Replace button and sends nothing when cancelled', async () => {
+      const api = replaceApi([
+        { target: '~/.claude/skills', state: 'external' },
+        { target: '~/.config/goose/skills', state: 'external' },
+        { target: '~/.agents/skills', state: 'installed', installedVersion: 'deadbee' },
+      ])
+      render(<App api={api} />)
+      fireEvent.click(await screen.findByText('Alpha'))
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Replace Goose' }))
+      let dialog = await screen.findByRole('alertdialog')
+      expect(within(dialog).queryByText(/Claude Code/)).not.toBeInTheDocument()
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+      expect(api.install).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Replace Goose' }))
+      dialog = await screen.findByRole('alertdialog')
+      await act(async () => {
+        within(dialog).getByRole('button', { name: 'Replace' }).click()
+      })
+      expect(api.install).toHaveBeenLastCalledWith({
+        registryId: REG,
+        folderName: 'alpha',
+        mirrorRevision: 'deadbeef',
+        targets: ['~/.config/goose/skills'],
+        replaceTargets: ['~/.config/goose/skills'],
+      })
+    })
+
+    it('does not offer Replace for a skill removed from its registry', async () => {
+      const api = replaceApi([{ target: '~/.claude/skills', state: 'external' }], {
+        softDeleted: true,
+      })
+      render(<App api={api} />)
+      fireEvent.click(await screen.findByText('Alpha'))
+
+      await screen.findByRole('region', { name: 'On this Mac' })
+      expect(screen.queryByRole('button', { name: /^Replace/ })).not.toBeInTheDocument()
+    })
+  })
+
   it('gives every visible target its own actions in the detail panel, plus Install to all', async () => {
     const zencoder: InstallTargetStatus = {
       id: '~/.zencoder/skills',
