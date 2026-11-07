@@ -16,6 +16,10 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 - No `//` or `/* */` comments; JSDoc on declarations is fine. If code needs explaining, simplify it. A test enforces this.
 
+## Running the app
+
+`npm run dev` in `app/` runs the app with hot reload. In a linked git worktree it runs an isolated instance automatically: its own Vite port (printed at startup), its own data directory, and a fake home under `<worktree>/.gotskills-dev/` (seeded with `.claude` and `.codex`), so installs never touch the real agent folders or another worktree's instance. Delete `.gotskills-dev/` to start from a clean slate. The primary checkout keeps the real data and port 1420. Each worktree needs its own `npm ci` and its first Rust build is cold.
+
 ## Checks
 
 Run `npm run check` from the repository root before handing work back to the user. Subagents working on part of a larger task run only the checks that cover their change; whoever hands the finished work back runs the full check once.
