@@ -267,7 +267,7 @@ jobs:
         if: inputs.dry_run != true
         working-directory: app
         run: |
-          APP=src-tauri/target/universal-apple-darwin/release/bundle/macos/Got Skills.app
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Got Skills.app"
           codesign --verify --deep --strict "$APP"
           xcrun stapler validate "$APP"
 
