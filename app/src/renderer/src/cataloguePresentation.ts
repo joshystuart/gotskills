@@ -267,12 +267,21 @@ const ATTENTION_LABELS: [ReconcileState, AttentionLabel][] = [
   ['removed-from-registry', { tone: 'bad', glyph: '×', text: 'Removed', cellText: 'Removed' }],
   ['orphaned', { tone: 'quiet', glyph: '⊘', text: 'Orphaned', cellText: 'Orphaned' }],
   ['update-available', { tone: 'warn', glyph: '↑', text: 'Update ready', cellText: 'Update' }],
+  ['external', { tone: 'quiet', glyph: '·', text: 'External', cellText: 'External' }],
+  [
+    'other-registry',
+    { tone: 'quiet', glyph: '·', text: 'Held by another registry', cellText: 'Other registry' },
+  ],
 ]
 
 export interface RowAttention {
   label: AttentionLabel
   targets: InstallTargetStatus[]
+  /** True when the targets hold a skill Got Skills didn't install there (an Installation Collision). */
+  collision: boolean
 }
+
+const COLLISION_STATES: ReconcileState[] = ['external', 'other-registry']
 
 const INSTALLED_LIKE: ReconcileState[] = [
   'installed',
@@ -293,7 +302,9 @@ export function rowAttention(
 ): RowAttention | null {
   for (const [state, label] of ATTENTION_LABELS) {
     const held = targets.filter((target) => holdsState(skill, target.id, state))
-    if (held.length > 0) return { label, targets: held }
+    if (held.length > 0) {
+      return { label, targets: held, collision: COLLISION_STATES.includes(state) }
+    }
   }
   return null
 }
