@@ -3,19 +3,17 @@ import type {
   InstallResult,
   InstallTargetId,
   InstallTargetStatus,
-  ReconcileState,
   SkillSummary,
 } from '../../shared/ipc'
 import { shortSha } from '../../shared/shortSha'
 import {
   formatUpdatedAt,
+  isCollided,
   staleSkillNotice,
   targetLabel,
   targetState,
   targetStateLabel,
 } from './cataloguePresentation'
-
-const COLLIDED_STATES: ReconcileState[] = ['external', 'other-registry']
 
 interface InstallActions {
   visible: boolean
@@ -68,9 +66,7 @@ export function SkillDetailPanel({
   const lacking = targets
     .map((target) => target.id)
     .filter((target) => targetState(skill, target) === 'not-installed')
-  const collided = targets
-    .map((target) => target.id)
-    .filter((target) => COLLIDED_STATES.includes(targetState(skill, target)))
+  const collided = targets.map((target) => target.id).filter((target) => isCollided(skill, target))
   const mainAction =
     lacking.length > 0
       ? {
@@ -104,7 +100,7 @@ export function SkillDetailPanel({
       {
         text: 'Replace',
         label: `Replace ${target.label}`,
-        shown: installActions.visible && COLLIDED_STATES.includes(state),
+        shown: installActions.visible && isCollided(skill, target.id),
         disabled: installActions.disabled,
         run: installActions.onReplace,
       },

@@ -11,6 +11,7 @@ import {
   deriveUpdateItems,
   deriveUpdateWork,
   filterByRegistry,
+  isCollided,
   REGISTRY_PALETTE,
   registryColour,
   registryOwnerLabel,
@@ -505,5 +506,23 @@ describe('skillsInView for Installation Collisions', () => {
     })
 
     expect(skillsInView([external, held, installed], 'installed')).toEqual([installed])
+  })
+})
+
+describe('isCollided', () => {
+  const perTarget = [
+    { target: '~/.claude/skills', state: 'external' as const },
+    { target: '~/.agents/skills', state: 'other-registry' as const },
+    { target: '~/.codex/skills', state: 'installed' as const },
+  ]
+
+  it('is true for targets held by an external or another registry copy', () => {
+    expect(isCollided(skill({ perTarget }), '~/.claude/skills')).toBe(true)
+    expect(isCollided(skill({ perTarget }), '~/.agents/skills')).toBe(true)
+  })
+
+  it('is false for installed targets and targets the Skill does not report', () => {
+    expect(isCollided(skill({ perTarget }), '~/.codex/skills')).toBe(false)
+    expect(isCollided(skill({ perTarget }), '~/.other/skills')).toBe(false)
   })
 })

@@ -2,11 +2,11 @@ import type {
   InstallRequest,
   InstallResult,
   InstallTargetId,
-  ReconcileState,
   SkillSummary,
   SyncStatus,
 } from '../../shared/ipc'
 import {
+  isCollided,
   staleDisclosures,
   targetState,
   type StaleRegistryDisclosure,
@@ -49,8 +49,6 @@ export interface InstallWorkOptions {
   status?: SyncStatus | null
 }
 
-const COLLIDED_STATES: ReconcileState[] = ['external', 'other-registry']
-
 /**
  * Decides, for each selected Skill, whether it installs and into which of the
  * chosen targets. It never updates or repairs: a target that holds the Skill
@@ -67,7 +65,7 @@ export function deriveInstallWork(
   let skipped = 0
   let skippedCollisions = 0
   for (const skill of skills) {
-    const collided = chosenTargets.filter((t) => COLLIDED_STATES.includes(targetState(skill, t)))
+    const collided = chosenTargets.filter((t) => isCollided(skill, t))
     const replaceTargets = options.replaceExisting ? collided : []
     const targets = chosenTargets.filter(
       (t) => targetState(skill, t) === 'not-installed' || replaceTargets.includes(t)

@@ -252,6 +252,12 @@ export function targetState(skill: SkillSummary, target: InstallTargetId): Recon
   return skill.perTarget.find((p) => p.target === target)?.state ?? 'not-installed'
 }
 
+const COLLIDED_STATES: ReconcileState[] = ['external', 'other-registry']
+
+export function isCollided(skill: SkillSummary, target: InstallTargetId): boolean {
+  return COLLIDED_STATES.includes(targetState(skill, target))
+}
+
 export function replacementOutcome(occupant: CollisionOccupant | undefined): string | undefined {
   switch (occupant?.kind) {
     case 'symlink':
