@@ -1573,6 +1573,32 @@ describe('Catalogue table', () => {
     expect(within(beta).getByText('1')).toBeInTheDocument()
     expect(within(beta).getByText('Update')).toBeInTheDocument()
     expect(within(beta).queryByText('External')).not.toBeInTheDocument()
+    const spoken = 'Installed in Claude Code. Update ready in Claude Code. External in Cursor'
+    expect(within(beta).getByText(spoken, { selector: '.sr-only' })).toBeInTheDocument()
+    expect(within(beta).getByRole('tooltip', { hidden: true })).toHaveTextContent(spoken)
+  })
+
+  it('names both collision kinds while showing the higher-priority External label', async () => {
+    const skills = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'external' },
+          { target: '~/.agents/skills', state: 'other-registry' },
+        ],
+      }),
+    ]
+    render(<App api={fakeApi(syncStatus(), skills)} />)
+    await screen.findByText('Alpha')
+    const row = screen.getByRole('option')
+
+    expect(within(row).getByText('External')).toBeInTheDocument()
+    expect(within(row).queryByText('Other registry')).not.toBeInTheDocument()
+    const spoken = 'External in Claude Code. Held by another registry in Cursor'
+    expect(within(row).getByText(spoken, { selector: '.sr-only' })).toBeInTheDocument()
+    expect(within(row).getByRole('tooltip', { hidden: true })).toHaveTextContent(spoken)
   })
 
   it('marks a row whose skill was removed from its registry', async () => {

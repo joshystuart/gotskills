@@ -1,7 +1,12 @@
 import type { JSX } from 'react'
 import type { InstallTargetStatus, RegistryRecord, SkillSummary } from '../../shared/ipc'
 import type { ClickModifiers } from './catalogueSelection'
-import { registryDotColour, rowAttention, targetsWithSkill } from './cataloguePresentation'
+import {
+  registryDotColour,
+  rowAttention,
+  targetState,
+  targetsWithSkill,
+} from './cataloguePresentation'
 
 interface CatalogueListProps {
   skills: SkillSummary[]
@@ -27,6 +32,10 @@ function InstalledCell({
 }): JSX.Element {
   const installed = targetsWithSkill(skill, targets)
   const attention = rowAttention(skill, targets)
+  const external = targets.filter((target) => targetState(skill, target.id) === 'external')
+  const otherRegistry = targets.filter(
+    (target) => targetState(skill, target.id) === 'other-registry'
+  )
   if (installed.length === 0 && !attention) {
     return (
       <span className="installed-cell">
@@ -37,7 +46,13 @@ function InstalledCell({
   }
   const spoken = [
     ...(installed.length > 0 ? [`Installed in ${labelList(installed)}`] : []),
-    ...(attention ? [`${attention.label.text} in ${labelList(attention.targets)}`] : []),
+    ...(attention && !attention.collision
+      ? [`${attention.label.text} in ${labelList(attention.targets)}`]
+      : []),
+    ...(external.length > 0 ? [`External in ${labelList(external)}`] : []),
+    ...(otherRegistry.length > 0
+      ? [`Held by another registry in ${labelList(otherRegistry)}`]
+      : []),
   ].join('. ')
   return (
     <span className="installed-cell">
@@ -50,7 +65,7 @@ function InstalledCell({
         </span>
       ) : null}
       <span role="tooltip" aria-hidden="true" className="installed-targets">
-        {attention?.collision ? spoken : labelList(installed)}
+        {external.length + otherRegistry.length > 0 ? spoken : labelList(installed)}
       </span>
     </span>
   )
