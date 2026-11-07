@@ -9,10 +9,11 @@ use rusqlite::Connection;
 
 use crate::env::Environment;
 use crate::error::AppResult;
+use crate::registries::{list_registries, registry_label};
 use crate::short_sha::short_sha;
 use crate::types::{
-    skill_id, DiskProbe, InstallRecord, PerTargetState, ReconcileEntry, ReconcileReport,
-    ReconcileState,
+    skill_id, CollisionOccupant, DiskProbe, InstallRecord, PerTargetState, ReconcileEntry,
+    ReconcileReport, ReconcileState,
 };
 
 use super::agents::AgentDirectory;
@@ -169,6 +170,11 @@ pub fn reconcile(deps: &ReconcileDeps) -> AppResult<ReconcileReport> {
         .map(|rec| ((rec.target.as_str(), rec.folder_name.as_str()), rec))
         .collect();
     let home = &deps.environment.home;
+    let registries = list_registries(deps.conn, true)?;
+    let registry_labels: HashMap<&str, String> = registries
+        .iter()
+        .map(|registry| (registry.id.as_str(), registry_label(registry, home)))
+        .collect();
     let targets: Vec<String> = detect_install_targets(
         deps.environment,
         deps.agents,
@@ -184,11 +190,11 @@ pub fn reconcile(deps: &ReconcileDeps) -> AppResult<ReconcileReport> {
         let updates_unavailable = !meta.registry_enabled || meta.registry_removed;
         let mirror_hash = meta.head_content_hash.as_deref();
         for target in &targets {
-            let occupant = occupancy
+            let holder = occupancy
                 .get(&(target.as_str(), meta.folder_name.as_str()))
                 .copied();
-            let ours = occupant.filter(|rec| rec.registry_id == meta.registry_id);
-            let occupied_by_other = occupant.is_some_and(|rec| rec.registry_id != meta.registry_id);
+            let ours = holder.filter(|rec| rec.registry_id == meta.registry_id);
+            let other = holder.filter(|rec| rec.registry_id != meta.registry_id);
             let probes = vec![probe_path(&target_install_path(
                 home,
                 target,
@@ -198,10 +204,23 @@ pub fn reconcile(deps: &ReconcileDeps) -> AppResult<ReconcileReport> {
                 soft_deleted: meta.soft_deleted,
                 updates_unavailable,
                 record: ours,
-                occupied_by_other,
+                occupied_by_other: other.is_some(),
                 mirror_hash,
                 probes: &probes,
             });
+            let occupant = match state {
+                ReconcileState::External if probes[0].is_symlink => {
+                    Some(CollisionOccupant::Symlink)
+                }
+                ReconcileState::External => Some(CollisionOccupant::Folder),
+                ReconcileState::OtherRegistry => other.map(|rec| CollisionOccupant::Registry {
+                    registry_label: registry_labels
+                        .get(rec.registry_id.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| rec.registry_id.clone()),
+                }),
+                _ => None,
+            };
             entries.push(ReconcileEntry {
                 registry_id: meta.registry_id.clone(),
                 folder_name: meta.folder_name.clone(),
@@ -212,6 +231,7 @@ pub fn reconcile(deps: &ReconcileDeps) -> AppResult<ReconcileReport> {
                 mirror_hash: meta.head_content_hash.clone(),
                 disk: probes,
                 lock_agrees: lock_agrees(home, &meta.folder_name, ours.is_some()),
+                occupant,
             });
         }
     }
@@ -240,6 +260,7 @@ pub fn per_target_from_reconcile(
                     .get(&entry.target)
                     .map(|rec| rec.provenance_sha.as_str()),
             ),
+            occupant: entry.occupant.clone(),
         })
         .collect()
 }
@@ -252,7 +273,7 @@ mod tests {
     use crate::installer::targets::fixtures::table;
     use crate::installer::test_support::*;
     use crate::installer::uninstall::{uninstall_skill, UninstallDeps};
-    use crate::types::{InstallRequest, UninstallRequest};
+    use crate::types::{CollisionOccupant, InstallRequest, UninstallRequest};
 
     struct Fixture {
         home: tempfile::TempDir,
@@ -281,12 +302,17 @@ mod tests {
 
     impl Fixture {
         fn install(&self, targets: &[&str]) {
+            self.install_over(targets, &[]);
+        }
+
+        fn install_over(&self, targets: &[&str], replace: &[&str]) {
             let deps = InstallDeps {
                 conn: &self.conn,
                 registry_id: REGISTRY,
                 mirror_path: self.mirror.path(),
                 environment: &self.env,
                 current_revision: "rev",
+                trash: &no_trash,
             };
             let request = InstallRequest {
                 registry_id: REGISTRY.into(),
@@ -294,6 +320,7 @@ mod tests {
                 targets: targets.iter().map(|t| t.to_string()).collect(),
                 mirror_revision: "rev".into(),
                 acknowledge_stale: None,
+                replace_targets: replace.iter().map(|t| t.to_string()).collect(),
             };
             install_skill(&deps, &request).unwrap();
         }
@@ -318,6 +345,15 @@ mod tests {
                 .state
         }
 
+        fn occupant(&self, target: &str) -> Option<CollisionOccupant> {
+            self.report()
+                .entries
+                .into_iter()
+                .find(|e| e.target == target)
+                .unwrap_or_else(|| panic!("no entry for {target}"))
+                .occupant
+        }
+
         fn skill_dir(&self, rel: &str) -> std::path::PathBuf {
             self.home.path().join(rel).join("alpha")
         }
@@ -331,9 +367,11 @@ mod tests {
         let f = fixture(&["claude-code", "cursor"]);
         f.install(&[CLAUDE]);
         assert_eq!(f.state(CLAUDE), ReconcileState::Installed);
+        assert_eq!(f.occupant(CLAUDE), None);
 
         fs::remove_dir_all(f.skill_dir(".claude/skills")).unwrap();
         assert_eq!(f.state(CLAUDE), ReconcileState::NeedsRepair);
+        assert_eq!(f.occupant(CLAUDE), None);
         assert!(!f.skill_dir(".claude/skills").exists());
 
         f.install(&[CLAUDE]);
@@ -351,6 +389,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(f.state(CLAUDE), ReconcileState::UpdateAvailable);
+        assert_eq!(f.occupant(CLAUDE), None);
 
         f.install(&[CLAUDE]);
         assert_eq!(f.state(CLAUDE), ReconcileState::Installed);
@@ -387,6 +426,7 @@ mod tests {
             .execute("UPDATE skill SET soft_deleted = 1", [])
             .unwrap();
         assert_eq!(f.state(CLAUDE), ReconcileState::RemovedFromRegistry);
+        assert_eq!(f.occupant(CLAUDE), None);
     }
 
     #[test]
@@ -417,15 +457,54 @@ mod tests {
         fs::create_dir_all(f.skill_dir(".agents/skills")).unwrap();
         fs::write(f.skill_dir(".agents/skills").join("SKILL.md"), "x").unwrap();
         assert_eq!(f.state(CLAUDE), ReconcileState::NotInstalled);
+        assert_eq!(f.occupant(CLAUDE), None);
         assert_eq!(f.state(SHARED), ReconcileState::External);
+        assert_eq!(f.occupant(SHARED), Some(CollisionOccupant::Folder));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_external_symlink_is_occupied_by_a_symlink() {
+        let f = fixture(&["claude-code"]);
+        let own = f.home.path().join("my-skills/alpha");
+        fs::create_dir_all(&own).unwrap();
+        fs::create_dir_all(f.home.path().join(".claude/skills")).unwrap();
+        std::os::unix::fs::symlink(&own, f.skill_dir(".claude/skills")).unwrap();
+        assert_eq!(f.state(CLAUDE), ReconcileState::External);
+        assert_eq!(f.occupant(CLAUDE), Some(CollisionOccupant::Symlink));
     }
 
     #[test]
     fn another_registrys_record_is_other_registry() {
         let f = fixture(&["claude-code"]);
         add_registry(&f.conn, "reg-b", true, false);
+        f.conn
+            .execute(
+                "UPDATE registry SET name = 'Team skills' WHERE id = 'reg-b'",
+                [],
+            )
+            .unwrap();
         upsert_install_record(&f.conn, &record(CLAUDE, "alpha", "reg-b")).unwrap();
         assert_eq!(f.state(CLAUDE), ReconcileState::OtherRegistry);
+        assert_eq!(
+            f.occupant(CLAUDE),
+            Some(CollisionOccupant::Registry {
+                registry_label: "Team skills".into()
+            })
+        );
+    }
+
+    #[test]
+    fn replacing_another_registrys_install_makes_it_installed_from_this_one() {
+        let f = fixture(&["claude-code"]);
+        add_registry(&f.conn, "reg-b", true, false);
+        upsert_install_record(&f.conn, &record(CLAUDE, "alpha", "reg-b")).unwrap();
+        fs::create_dir_all(f.skill_dir(".claude/skills")).unwrap();
+        fs::write(f.skill_dir(".claude/skills").join("SKILL.md"), "reg-b").unwrap();
+
+        f.install_over(&[CLAUDE], &[CLAUDE]);
+
+        assert_eq!(f.state(CLAUDE), ReconcileState::Installed);
     }
 
     #[cfg(unix)]
@@ -443,6 +522,7 @@ mod tests {
         let entry = report.entries.iter().find(|e| e.target == CLAUDE).unwrap();
 
         assert_eq!(entry.state, ReconcileState::NeedsRepair);
+        assert_eq!(entry.occupant, None);
         assert!(!entry.disk[0].exists);
         assert_eq!(
             fs::symlink_metadata(&path).unwrap().modified().unwrap(),

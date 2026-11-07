@@ -36,6 +36,7 @@ import {
   isInstalledLike,
   registryDotColour,
   registryRecordLabel,
+  replaceTargetLabel,
   searchSkills,
   skillsInView,
   targetLabel,
@@ -98,6 +99,7 @@ export function App({ api }: AppProps): JSX.Element {
   const [lastInstall, setLastInstall] = useState<InstallResult | null>(null)
   const [acknowledgedStale, setAcknowledgedStale] = useState(false)
   const [pendingRemoval, setPendingRemoval] = useState<InstallTargetId[] | null>(null)
+  const [pendingReplace, setPendingReplace] = useState<InstallTargetId[] | null>(null)
   const [pendingRegistryRemoval, setPendingRegistryRemoval] = useState<RegistryRecord | null>(null)
   const [highlightedRegistryId, setHighlightedRegistryId] = useState<string | null>(null)
   const [fileViewerOpen, setFileViewerOpen] = useState(false)
@@ -111,6 +113,8 @@ export function App({ api }: AppProps): JSX.Element {
   const [installChips, setInstallChips] = useState<InstallTargetId[]>([])
   const [installPhase, setInstallPhase] = useState<BulkInstallPhase>({ kind: 'idle' })
   const [installAcknowledgeStale, setInstallAcknowledgeStale] = useState(false)
+  const [installReplace, setInstallReplace] = useState(false)
+  const [pendingBulkReplace, setPendingBulkReplace] = useState(false)
   const searchRef = useRef<HTMLInputElement | null>(null)
   /**
    * Kept live so a bulk run always dispatches against the current sync
@@ -250,7 +254,11 @@ export function App({ api }: AppProps): JSX.Element {
     setSettingsOpen(true)
   }, [])
 
-  const confirmOpen = pendingRemoval !== null || pendingRegistryRemoval !== null
+  const confirmOpen =
+    pendingRemoval !== null ||
+    pendingReplace !== null ||
+    pendingBulkReplace ||
+    pendingRegistryRemoval !== null
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -530,6 +538,7 @@ export function App({ api }: AppProps): JSX.Element {
     if (selection.ids.size === 0 && next.ids.size > 0) {
       setInstallChips(visibleTargetIds)
       setInstallAcknowledgeStale(false)
+      setInstallReplace(false)
     }
     setSelection(next)
     setSelectedId(skillId)
@@ -539,8 +548,17 @@ export function App({ api }: AppProps): JSX.Element {
   const installWork = deriveInstallWork(
     skills.filter((s) => selection.ids.has(s.id)),
     visibleTargetIds.filter((id) => installChips.includes(id)),
-    { acknowledgeStale: installAcknowledgeStale, isInstalledOnly, status }
+    { acknowledgeStale: installAcknowledgeStale, replace: installReplace, isInstalledOnly, status }
   )
+
+  const bulkReplacements = installWork.items.flatMap((item) => {
+    const skill = skills.find((s) => s.id === item.skillId)
+    if (!skill) return []
+    return item.replaceTargets.map((target) => ({
+      key: `${item.skillId} ${target}`,
+      text: `${item.name}: ${replaceTargetLabel(targets, skill, target)}`,
+    }))
+  })
 
   function toggleInstallChip(target: InstallTargetId): void {
     setInstallChips((chips) =>
@@ -548,7 +566,13 @@ export function App({ api }: AppProps): JSX.Element {
     )
   }
 
+  function onInstallSelection(): void {
+    if (bulkReplacements.length > 0) setPendingBulkReplace(true)
+    else void onRunInstallSelection()
+  }
+
   async function onRunInstallSelection(): Promise<void> {
+    setPendingBulkReplace(false)
     const work = installWork
     if (runInFlight || work.items.length === 0) return
     runInFlightRef.current = true
@@ -574,6 +598,7 @@ export function App({ api }: AppProps): JSX.Element {
   function dismissInstallSummary(): void {
     setInstallPhase({ kind: 'idle' })
     setInstallAcknowledgeStale(false)
+    setInstallReplace(false)
   }
 
   const updateAllWork = deriveUpdateWork(skills, status)
@@ -629,7 +654,8 @@ export function App({ api }: AppProps): JSX.Element {
   function buildInstallRequest(
     skill: SkillSummary,
     installTargets: InstallTargetId[],
-    revision: string
+    revision: string,
+    replaceTargets: InstallTargetId[] = []
   ): InstallRequest {
     const req: InstallRequest = {
       registryId: skill.registryId,
@@ -638,10 +664,15 @@ export function App({ api }: AppProps): JSX.Element {
       mirrorRevision: revision,
     }
     if (skill.stale && acknowledgedStale) req.acknowledgeStale = true
+    if (replaceTargets.length > 0) req.replaceTargets = replaceTargets
     return req
   }
 
-  async function runInstall(installTargets: InstallTargetId[]): Promise<void> {
+  async function runInstall(
+    installTargets: InstallTargetId[],
+    replaceTargets: InstallTargetId[] = []
+  ): Promise<void> {
+    setPendingReplace(null)
     if (!selected || installTargets.length === 0) return
     const revision = revisionFor(selected)
     if (!revision) {
@@ -651,7 +682,9 @@ export function App({ api }: AppProps): JSX.Element {
     setInstalling(true)
     setInstallError(null)
     try {
-      const result = await api.install(buildInstallRequest(selected, installTargets, revision))
+      const result = await api.install(
+        buildInstallRequest(selected, installTargets, revision, replaceTargets)
+      )
       setLastInstall(result)
       await loadCatalogue()
     } catch (err) {
@@ -860,9 +893,11 @@ export function App({ api }: AppProps): JSX.Element {
                 busy={busy}
                 acknowledgeStale={installAcknowledgeStale}
                 onAcknowledgeStale={setInstallAcknowledgeStale}
+                replace={installReplace}
+                onReplace={setInstallReplace}
                 onToggleTarget={toggleInstallChip}
                 onClear={() => setSelection(EMPTY_SELECTION)}
-                onInstall={() => void onRunInstallSelection()}
+                onInstall={onInstallSelection}
                 onCancel={cancelUpdateAll}
                 onDismiss={dismissInstallSummary}
               />
@@ -913,6 +948,7 @@ export function App({ api }: AppProps): JSX.Element {
                     updateTargets,
                     onInstall: runInstall,
                     onUpdate: runRepair,
+                    onReplace: setPendingReplace,
                   }}
                   repairRemove={{
                     repairTargets,
@@ -954,6 +990,42 @@ export function App({ api }: AppProps): JSX.Element {
           {pendingRemoval.length === 1
             ? `Remove “${selected.name}” from ${targetLabel(targets, pendingRemoval[0])}?`
             : `Remove “${selected.name}” from installed apps on this Mac?`}
+        </ConfirmDialog>
+      ) : null}
+
+      {pendingReplace && selected ? (
+        <ConfirmDialog
+          title="Replace skill?"
+          confirmLabel="Replace"
+          confirmDisabled={busy}
+          onConfirm={() => void runInstall(pendingReplace, pendingReplace)}
+          onCancel={() => setPendingReplace(null)}
+        >
+          <p>
+            Install “{selected.name}” from {selected.registryLabel} over the skill already in:
+          </p>
+          <ul className="modal-list">
+            {pendingReplace.map((target) => (
+              <li key={target}>{replaceTargetLabel(targets, selected, target)}</li>
+            ))}
+          </ul>
+        </ConfirmDialog>
+      ) : null}
+
+      {pendingBulkReplace ? (
+        <ConfirmDialog
+          title="Replace skills?"
+          confirmLabel="Replace"
+          confirmDisabled={busy}
+          onConfirm={() => void onRunInstallSelection()}
+          onCancel={() => setPendingBulkReplace(false)}
+        >
+          <p>Install these skills over the skills already in:</p>
+          <ul className="modal-list">
+            {bulkReplacements.map((replacement) => (
+              <li key={replacement.key}>{replacement.text}</li>
+            ))}
+          </ul>
         </ConfirmDialog>
       ) : null}
 

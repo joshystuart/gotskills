@@ -1871,6 +1871,15 @@ button:disabled {
   color: var(--muted);
 }
 
+.modal-body p {
+  margin: 0 0 8px;
+}
+
+.modal-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -1888,4 +1897,11 @@ button:disabled {
   align-items: center;
   gap: 4px;
   font-size: 0.75rem;
+}
+
+.selection-replace {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
 }

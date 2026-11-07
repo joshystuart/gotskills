@@ -1,6 +1,7 @@
 //! Shared fixtures for installer tests.
 
 use std::fs;
+use std::io;
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -45,4 +46,12 @@ pub fn write_mirror_skill(mirror: &Path, folder: &str, body: &str) {
     let dir = mirror.join("skills").join(folder);
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("SKILL.md"), body).unwrap();
+}
+
+/// A trash step for tests that never replace a real folder.
+pub fn no_trash(path: &Path) -> io::Result<()> {
+    Err(io::Error::other(format!(
+        "unexpected trash of {}",
+        path.display()
+    )))
 }

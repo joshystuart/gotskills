@@ -1,4 +1,5 @@
 import type {
+  CollisionOccupant,
   InstallTargetId,
   InstallTargetStatus,
   ReconcileState,
@@ -231,6 +232,28 @@ export function targetLabel(targets: InstallTargetStatus[], target: InstallTarge
   return targets.find((candidate) => candidate.id === target)?.label ?? target
 }
 
+function replaceOutcome(occupant: CollisionOccupant): string {
+  switch (occupant.kind) {
+    case 'symlink':
+      return 'link removed'
+    case 'folder':
+      return 'moved to the Trash'
+    case 'registry':
+      return `replaces the copy from ${occupant.registryLabel}`
+  }
+}
+
+/** A target's label and what replacing it does to what is there now. */
+export function replaceTargetLabel(
+  targets: InstallTargetStatus[],
+  skill: SkillSummary,
+  target: InstallTargetId
+): string {
+  const label = targetLabel(targets, target)
+  const occupant = skill.perTarget.find((entry) => entry.target === target)?.occupant
+  return occupant ? `${label} — ${replaceOutcome(occupant)}` : label
+}
+
 export interface StateLabel {
   glyph: string
   text: string
@@ -251,6 +274,18 @@ export function targetState(skill: SkillSummary, target: InstallTargetId): Recon
   return skill.perTarget.find((p) => p.target === target)?.state ?? 'not-installed'
 }
 
+/** The states that mean a target holds an Installation Collision. */
+export const COLLISION_STATES: ReconcileState[] = ['external', 'other-registry']
+
+/** The targets, in the given order, where the Skill is in one of `states`. */
+export function targetsInStates(
+  skill: SkillSummary,
+  targets: InstallTargetId[],
+  states: ReconcileState[]
+): InstallTargetId[] {
+  return targets.filter((target) => states.includes(targetState(skill, target)))
+}
+
 export function targetStateLabel(skill: SkillSummary, target: InstallTargetId): StateLabel {
   return STATE_LABELS[targetState(skill, target)]
 }
@@ -267,11 +302,18 @@ const ATTENTION_LABELS: [ReconcileState, AttentionLabel][] = [
   ['removed-from-registry', { tone: 'bad', glyph: '×', text: 'Removed', cellText: 'Removed' }],
   ['orphaned', { tone: 'quiet', glyph: '⊘', text: 'Orphaned', cellText: 'Orphaned' }],
   ['update-available', { tone: 'warn', glyph: '↑', text: 'Update ready', cellText: 'Update' }],
+  ['external', { tone: 'quiet', glyph: '·', text: 'External', cellText: 'External' }],
+  [
+    'other-registry',
+    { tone: 'quiet', glyph: '·', text: 'Held by another registry', cellText: 'Other registry' },
+  ],
 ]
 
 export interface RowAttention {
   label: AttentionLabel
   targets: InstallTargetStatus[]
+  /** True when the targets hold a skill Got Skills didn't install there (an Installation Collision). */
+  collision: boolean
 }
 
 const INSTALLED_LIKE: ReconcileState[] = [
@@ -293,7 +335,9 @@ export function rowAttention(
 ): RowAttention | null {
   for (const [state, label] of ATTENTION_LABELS) {
     const held = targets.filter((target) => holdsState(skill, target.id, state))
-    if (held.length > 0) return { label, targets: held }
+    if (held.length > 0) {
+      return { label, targets: held, collision: COLLISION_STATES.includes(state) }
+    }
   }
   return null
 }

@@ -40,9 +40,9 @@ export function ConfirmDialog({
         <h2 id={`${id}-title`} className="modal-title">
           {title}
         </h2>
-        <p id={`${id}-desc`} className="modal-body">
+        <div id={`${id}-desc`} className="modal-body">
           {children}
-        </p>
+        </div>
         <div className="modal-actions">
           <button type="button" className="secondary" autoFocus onClick={onCancel}>
             Cancel

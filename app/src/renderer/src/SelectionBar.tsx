@@ -27,6 +27,8 @@ interface SelectionBarProps {
   busy: boolean
   acknowledgeStale: boolean
   onAcknowledgeStale: (on: boolean) => void
+  replace: boolean
+  onReplace: (on: boolean) => void
   onToggleTarget: (target: InstallTargetId) => void
   onClear: () => void
   onInstall: () => void
@@ -93,16 +95,22 @@ function IdleBar({
   busy,
   acknowledgeStale,
   onAcknowledgeStale,
+  replace,
+  onReplace,
   onToggleTarget,
   onClear,
   onInstall,
 }: SelectionBarProps): JSX.Element {
   const n = work.items.length
+  const collisions = work.skippedCollisions
   return (
     <>
       <div className="update-all-idle">
         <span className="update-all-count" role="status" aria-live="polite">
           {count} selected · {work.skipped} skipped
+          {collisions > 0
+            ? ` · ${collisions} ${collisions === 1 ? 'target' : 'targets'} skipped as collisions`
+            : null}
         </span>
         <div className="selection-chips">
           {targets.map((target) => (
@@ -116,6 +124,10 @@ function IdleBar({
             </label>
           ))}
         </div>
+        <label className="selection-replace">
+          <input type="checkbox" checked={replace} onChange={(e) => onReplace(e.target.checked)} />
+          Replace existing skills
+        </label>
         <StaleDisclosures
           disclosures={work.disclosures}
           acknowledgeStale={acknowledgeStale}
