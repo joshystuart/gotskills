@@ -176,6 +176,7 @@ fn per_target_from_reconcile(
         .map(|entry| PerTargetState {
             target: entry.target.clone(),
             state: entry.state,
+            occupant: entry.occupant.clone(),
             installed_version: short_sha(
                 records
                     .get(entry.target.as_str())
@@ -511,6 +512,7 @@ mod tests {
                 state,
                 installed_hash: None,
                 mirror_hash: None,
+                occupant: None,
                 disk: vec![],
                 lock_agrees: true,
             }],
@@ -679,6 +681,7 @@ mod tests {
             vec![PerTargetState {
                 target: "claude-code".into(),
                 state: ReconcileState::UpdateAvailable,
+                occupant: None,
                 installed_version: Some("1234567".into()),
             }]
         );

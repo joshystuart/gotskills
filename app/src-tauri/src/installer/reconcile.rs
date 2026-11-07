@@ -11,9 +11,11 @@ use crate::env::Environment;
 use crate::error::AppResult;
 use crate::short_sha::short_sha;
 use crate::types::{
-    skill_id, DiskProbe, InstallRecord, PerTargetState, ReconcileEntry, ReconcileReport,
-    ReconcileState,
+    skill_id, CollisionOccupant, DiskProbe, InstallRecord, PerTargetState, ReconcileEntry,
+    ReconcileReport, ReconcileState,
 };
+
+use crate::registries::{get_registry, registry_label};
 
 use super::agents::AgentDirectory;
 use super::records::read_install_records;
@@ -119,6 +121,28 @@ fn derive_state(input: &DeriveInput) -> ReconcileState {
     }
 }
 
+fn collision_occupant(
+    deps: &ReconcileDeps,
+    state: ReconcileState,
+    holder: Option<&InstallRecord>,
+    probe: &DiskProbe,
+) -> AppResult<Option<CollisionOccupant>> {
+    Ok(match (state, holder) {
+        (ReconcileState::External, _) if probe.is_symlink => Some(CollisionOccupant::Symlink),
+        (ReconcileState::External, _) => Some(CollisionOccupant::Folder),
+        (ReconcileState::OtherRegistry, Some(record)) => {
+            let label = match get_registry(deps.conn, &record.registry_id)? {
+                Some(registry) => registry_label(&registry, &deps.environment.home),
+                None => record.registry_id.clone(),
+            };
+            Some(CollisionOccupant::Registry {
+                registry_label: label,
+            })
+        }
+        _ => None,
+    })
+}
+
 /// Inputs of [`reconcile`].
 pub struct ReconcileDeps<'a> {
     pub conn: &'a Connection,
@@ -202,6 +226,7 @@ pub fn reconcile(deps: &ReconcileDeps) -> AppResult<ReconcileReport> {
                 mirror_hash,
                 probes: &probes,
             });
+            let collision = collision_occupant(deps, state, occupant, &probes[0])?;
             entries.push(ReconcileEntry {
                 registry_id: meta.registry_id.clone(),
                 folder_name: meta.folder_name.clone(),
@@ -210,6 +235,7 @@ pub fn reconcile(deps: &ReconcileDeps) -> AppResult<ReconcileReport> {
                 state,
                 installed_hash: ours.map(|rec| rec.content_hash.clone()),
                 mirror_hash: meta.head_content_hash.clone(),
+                occupant: collision,
                 disk: probes,
                 lock_agrees: lock_agrees(home, &meta.folder_name, ours.is_some()),
             });
@@ -235,6 +261,7 @@ pub fn per_target_from_reconcile(
         .map(|entry| PerTargetState {
             target: entry.target.clone(),
             state: entry.state,
+            occupant: entry.occupant.clone(),
             installed_version: short_sha(
                 records
                     .get(&entry.target)
@@ -318,6 +345,16 @@ mod tests {
                 .find(|e| e.target == target)
                 .unwrap_or_else(|| panic!("no entry for {target}"))
                 .state
+        }
+
+        fn occupant(&self, target: &str) -> Option<CollisionOccupant> {
+            self.report()
+                .entries
+                .iter()
+                .find(|e| e.target == target)
+                .unwrap_or_else(|| panic!("no entry for {target}"))
+                .occupant
+                .clone()
         }
 
         fn skill_dir(&self, rel: &str) -> std::path::PathBuf {
@@ -420,6 +457,84 @@ mod tests {
         fs::write(f.skill_dir(".agents/skills").join("SKILL.md"), "x").unwrap();
         assert_eq!(f.state(CLAUDE), ReconcileState::NotInstalled);
         assert_eq!(f.state(SHARED), ReconcileState::External);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_external_symlink_reports_a_symlink_occupant() {
+        let f = fixture(&["claude-code"]);
+        let elsewhere = f.home.path().join("my-skills/alpha");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::create_dir_all(f.skill_dir(".claude/skills").parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, f.skill_dir(".claude/skills")).unwrap();
+        assert_eq!(f.state(CLAUDE), ReconcileState::External);
+        assert_eq!(f.occupant(CLAUDE), Some(CollisionOccupant::Symlink));
+    }
+
+    #[test]
+    fn an_external_real_folder_reports_a_folder_occupant() {
+        let f = fixture(&["claude-code"]);
+        fs::create_dir_all(f.skill_dir(".claude/skills")).unwrap();
+        assert_eq!(f.state(CLAUDE), ReconcileState::External);
+        assert_eq!(f.occupant(CLAUDE), Some(CollisionOccupant::Folder));
+    }
+
+    #[test]
+    fn an_other_registry_target_reports_that_registrys_name() {
+        let f = fixture(&["claude-code"]);
+        add_registry(&f.conn, "reg-b", true, false);
+        f.conn
+            .execute(
+                "UPDATE registry SET name = 'Team Skills' WHERE id = 'reg-b'",
+                [],
+            )
+            .unwrap();
+        upsert_install_record(&f.conn, &record(CLAUDE, "alpha", "reg-b")).unwrap();
+        assert_eq!(
+            f.occupant(CLAUDE),
+            Some(CollisionOccupant::Registry {
+                registry_label: "Team Skills".into()
+            })
+        );
+    }
+
+    #[test]
+    fn an_other_registry_without_a_friendly_name_reports_its_automatic_name() {
+        let f = fixture(&["claude-code"]);
+        add_registry(&f.conn, "reg-b", true, false);
+        upsert_install_record(&f.conn, &record(CLAUDE, "alpha", "reg-b")).unwrap();
+        assert_eq!(
+            f.occupant(CLAUDE),
+            Some(CollisionOccupant::Registry {
+                registry_label: "example.test/reg-b".into()
+            })
+        );
+    }
+
+    #[test]
+    fn occupants_serialise_in_the_shape_the_renderer_reads() {
+        let registry = serde_json::to_value(CollisionOccupant::Registry {
+            registry_label: "Team".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            registry,
+            serde_json::json!({ "kind": "registry", "registryLabel": "Team" })
+        );
+        assert_eq!(
+            serde_json::to_value(CollisionOccupant::Symlink).unwrap(),
+            serde_json::json!({ "kind": "symlink" })
+        );
+    }
+
+    #[test]
+    fn targets_in_other_states_have_no_occupant() {
+        let f = fixture(&["claude-code", "cursor"]);
+        assert_eq!(f.state(CLAUDE), ReconcileState::NotInstalled);
+        assert_eq!(f.occupant(CLAUDE), None);
+        f.install(&[CLAUDE]);
+        assert_eq!(f.state(CLAUDE), ReconcileState::Installed);
+        assert_eq!(f.occupant(CLAUDE), None);
     }
 
     #[test]

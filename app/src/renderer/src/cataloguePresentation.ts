@@ -1,4 +1,5 @@
 import type {
+  CollisionOccupant,
   InstallTargetId,
   InstallTargetStatus,
   ReconcileState,
@@ -249,6 +250,19 @@ const STATE_LABELS: Record<ReconcileState, StateLabel> = {
 
 export function targetState(skill: SkillSummary, target: InstallTargetId): ReconcileState {
   return skill.perTarget.find((p) => p.target === target)?.state ?? 'not-installed'
+}
+
+export function replacementOutcome(occupant: CollisionOccupant | undefined): string | undefined {
+  switch (occupant?.kind) {
+    case 'symlink':
+      return 'link removed'
+    case 'folder':
+      return 'moved to the Trash'
+    case 'registry':
+      return `replaces the copy from ${occupant.registryLabel}`
+    default:
+      return undefined
+  }
 }
 
 export function targetStateLabel(skill: SkillSummary, target: InstallTargetId): StateLabel {

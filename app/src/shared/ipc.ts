@@ -71,9 +71,15 @@ export interface AutoUpdateResult {
   failed: { folderName: string; name: string; reason: string }[]
 }
 
+/** What occupies a collided install target. */
+export type CollisionOccupant =
+  { kind: 'symlink' } | { kind: 'folder' } | { kind: 'registry'; registryLabel: string }
+
 export interface PerTargetState {
   target: InstallTargetId
   state: ReconcileState
+  /** Present only on `external` and `other-registry` states. */
+  occupant?: CollisionOccupant
   /** Short provenance SHA of the installed snapshot, when installed. */
   installedVersion?: string
 }

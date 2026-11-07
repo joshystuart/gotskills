@@ -37,6 +37,7 @@ import {
   registryDotColour,
   registryRecordLabel,
   searchSkills,
+  replacementOutcome,
   skillsInView,
   targetLabel,
   viewLabel,
@@ -980,8 +981,20 @@ export function App({ api }: AppProps): JSX.Element {
           onConfirm={() => runReplace(pendingReplacement)}
           onCancel={() => setPendingReplacement(null)}
         >
-          Replace the existing “{selected.name}” in{' '}
-          {pendingReplacement.map((target) => targetLabel(targets, target)).join(', ')}?
+          Replace the existing “{selected.name}”?
+          <ul className="modal-list">
+            {pendingReplacement.map((target) => {
+              const outcome = replacementOutcome(
+                selected.perTarget.find((entry) => entry.target === target)?.occupant
+              )
+              return (
+                <li key={target}>
+                  {targetLabel(targets, target)}
+                  {outcome ? `: ${outcome}` : null}
+                </li>
+              )
+            })}
+          </ul>
         </ConfirmDialog>
       ) : null}
 

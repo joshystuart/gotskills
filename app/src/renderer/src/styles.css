@@ -1871,6 +1871,11 @@ button:disabled {
   color: var(--muted);
 }
 
+.modal-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

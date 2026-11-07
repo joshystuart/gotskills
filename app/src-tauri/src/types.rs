@@ -154,11 +154,26 @@ pub struct AutoUpdateResult {
     pub failed: Vec<AutoUpdateFailure>,
 }
 
+/// What occupies a collided install target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum CollisionOccupant {
+    Symlink,
+    Folder,
+    Registry { registry_label: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PerTargetState {
     pub target: String,
     pub state: ReconcileState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occupant: Option<CollisionOccupant>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
 }
@@ -379,6 +394,8 @@ pub struct ReconcileEntry {
     pub installed_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mirror_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occupant: Option<CollisionOccupant>,
     pub disk: Vec<DiskProbe>,
     pub lock_agrees: bool,
 }

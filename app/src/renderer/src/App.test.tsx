@@ -1898,8 +1898,12 @@ describe('Catalogue table', () => {
 
     it('reads Replace all when no target is empty and replaces every collided target after confirming', async () => {
       const api = replaceApi([
-        { target: '~/.claude/skills', state: 'external' },
-        { target: '~/.config/goose/skills', state: 'other-registry' },
+        { target: '~/.claude/skills', state: 'external', occupant: { kind: 'symlink' } },
+        {
+          target: '~/.config/goose/skills',
+          state: 'other-registry',
+          occupant: { kind: 'registry', registryLabel: 'Team Skills' },
+        },
         { target: '~/.agents/skills', state: 'installed', installedVersion: 'deadbee' },
       ])
       render(<App api={api} />)
@@ -1926,6 +1930,32 @@ describe('Catalogue table', () => {
         replaceTargets: ['~/.claude/skills', '~/.config/goose/skills'],
       })
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    })
+
+    it('tells the user what happens to what each collided target holds', async () => {
+      const api = replaceApi([
+        { target: '~/.claude/skills', state: 'external', occupant: { kind: 'symlink' } },
+        { target: '~/.config/goose/skills', state: 'external', occupant: { kind: 'folder' } },
+        {
+          target: '~/.agents/skills',
+          state: 'other-registry',
+          occupant: { kind: 'registry', registryLabel: 'Team Skills' },
+        },
+      ])
+      render(<App api={api} />)
+      fireEvent.click(await screen.findByText('Alpha'))
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Replace all' }))
+
+      const dialog = await screen.findByRole('alertdialog')
+      const items = within(dialog)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+      expect(items).toEqual([
+        'Claude Code: link removed',
+        'Goose: moved to the Trash',
+        'Cline, Codex, Cursor, Zed: replaces the copy from Team Skills',
+      ])
     })
 
     it('replaces a single target from its own Replace button and sends nothing when cancelled', async () => {
