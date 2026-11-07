@@ -33,7 +33,7 @@ pub struct InstallDeps<'a> {
     pub environment: &'a Environment,
     /// Current mirror HEAD SHA (the caller validates it under the mirror lock).
     pub current_revision: &'a str,
-    /// Moves a replaced real folder to the Trash; [`move_to_trash`] in production.
+    /// Moves a replaced real folder or file to the Trash; [`move_to_trash`] in production.
     pub trash: &'a dyn Fn(&Path) -> io::Result<()>,
 }
 
@@ -108,10 +108,11 @@ fn assert_no_collision(deps: &InstallDeps, folder_name: &str, target: &str) -> A
     }
 }
 
-fn is_external_folder(deps: &InstallDeps, folder_name: &str, target: &str) -> AppResult<bool> {
+fn is_external_real_entry(deps: &InstallDeps, folder_name: &str, target: &str) -> AppResult<bool> {
     let path = target_install_path(&deps.environment.home, target, folder_name);
-    let real_folder = fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_dir());
-    Ok(real_folder && read_occupancy(deps.conn, target, folder_name)?.is_none())
+    let real_entry =
+        fs::symlink_metadata(&path).is_ok_and(|metadata| !metadata.file_type().is_symlink());
+    Ok(real_entry && read_occupancy(deps.conn, target, folder_name)?.is_none())
 }
 
 fn install_one_target(
@@ -190,7 +191,7 @@ pub fn install_skill(deps: &InstallDeps, request: &InstallRequest) -> AppResult<
     let mut per_target = Vec::new();
     for target in &request.targets {
         let trash_first = request.replace_targets.contains(target)
-            && is_external_folder(deps, &request.folder_name, target)?;
+            && is_external_real_entry(deps, &request.folder_name, target)?;
         let result =
             install_one_target(deps, &skill_dir, &request.folder_name, target, trash_first);
         if result.outcome == TargetOutcome::Installed {
@@ -568,6 +569,41 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].target, "~/.claude/skills");
         assert_eq!(records[0].registry_id, REGISTRY);
+    }
+
+    #[test]
+    fn a_listed_external_file_goes_to_the_trash_and_is_replaced() {
+        let f = fixture();
+        let existing = f.home.path().join(".claude/skills/alpha");
+        fs::create_dir_all(existing.parent().unwrap()).unwrap();
+        fs::write(&existing, "a plain file").unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let trashed = std::cell::RefCell::new(Vec::new());
+        let trash = |path: &Path| {
+            trashed.borrow_mut().push(path.to_path_buf());
+            fs::rename(path, bin.path().join("alpha"))
+        };
+        let deps = InstallDeps {
+            trash: &trash,
+            ..f.deps()
+        };
+
+        let result = install_skill(
+            &deps,
+            &f.replacing(&["~/.claude/skills"], &["~/.claude/skills"]),
+        )
+        .unwrap();
+
+        assert_eq!(result.per_target[0].outcome, TargetOutcome::Installed);
+        assert_eq!(*trashed.borrow(), vec![existing.clone()]);
+        assert_eq!(
+            fs::read_to_string(bin.path().join("alpha")).unwrap(),
+            "a plain file"
+        );
+        assert_eq!(
+            fs::read_to_string(existing.join("SKILL.md")).unwrap(),
+            "alpha body"
+        );
     }
 
     #[test]

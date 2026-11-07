@@ -3,14 +3,15 @@ import type {
   InstallResult,
   InstallTargetId,
   InstallTargetStatus,
-  ReconcileState,
   SkillSummary,
 } from '../../shared/ipc'
 import { shortSha } from '../../shared/shortSha'
 import {
+  COLLISION_STATES,
   formatUpdatedAt,
   staleSkillNotice,
   targetLabel,
+  targetsInStates,
   targetState,
   targetStateLabel,
 } from './cataloguePresentation'
@@ -63,10 +64,9 @@ export function SkillDetailPanel({
   onAcknowledgedStaleChange,
   onClose,
 }: SkillDetailPanelProps): JSX.Element {
-  const targetsIn = (...states: ReconcileState[]) =>
-    targets.map((target) => target.id).filter((id) => states.includes(targetState(skill, id)))
-  const lacking = targetsIn('not-installed')
-  const collided = targetsIn('external', 'other-registry')
+  const targetIds = targets.map((target) => target.id)
+  const lacking = targetsInStates(skill, targetIds, ['not-installed'])
+  const collided = targetsInStates(skill, targetIds, COLLISION_STATES)
   const mainAction =
     lacking.length > 0
       ? {

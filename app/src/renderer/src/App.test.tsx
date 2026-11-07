@@ -5166,13 +5166,13 @@ describe('Catalogue multi-selection', () => {
         const replace = within(bar()).getByRole('checkbox', { name: 'Replace existing skills' })
         expect(replace).not.toBeChecked()
         expect(selectionCount()).toHaveTextContent(
-          '2 selected · 1 skipped · 3 existing skills skipped'
+          '2 selected · 1 skipped · 3 targets skipped as collisions'
         )
         expect(within(bar()).getByRole('button', { name: 'Install (1)' })).toBeEnabled()
 
         fireEvent.click(replace)
         expect(selectionCount()).toHaveTextContent('2 selected · 0 skipped')
-        expect(selectionCount()).not.toHaveTextContent('existing')
+        expect(selectionCount()).not.toHaveTextContent('collisions')
         expect(within(bar()).getByRole('button', { name: 'Install (2)' })).toBeEnabled()
       })
 

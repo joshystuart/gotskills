@@ -274,6 +274,18 @@ export function targetState(skill: SkillSummary, target: InstallTargetId): Recon
   return skill.perTarget.find((p) => p.target === target)?.state ?? 'not-installed'
 }
 
+/** The states that mean a target holds an Installation Collision. */
+export const COLLISION_STATES: ReconcileState[] = ['external', 'other-registry']
+
+/** The targets, in the given order, where the Skill is in one of `states`. */
+export function targetsInStates(
+  skill: SkillSummary,
+  targets: InstallTargetId[],
+  states: ReconcileState[]
+): InstallTargetId[] {
+  return targets.filter((target) => states.includes(targetState(skill, target)))
+}
+
 export function targetStateLabel(skill: SkillSummary, target: InstallTargetId): StateLabel {
   return STATE_LABELS[targetState(skill, target)]
 }
@@ -303,8 +315,6 @@ export interface RowAttention {
   /** True when the targets hold a skill Got Skills didn't install there (an Installation Collision). */
   collision: boolean
 }
-
-const COLLISION_STATES: ReconcileState[] = ['external', 'other-registry']
 
 const INSTALLED_LIKE: ReconcileState[] = [
   'installed',

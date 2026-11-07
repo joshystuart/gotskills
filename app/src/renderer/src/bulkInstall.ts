@@ -2,13 +2,13 @@ import type {
   InstallRequest,
   InstallResult,
   InstallTargetId,
-  ReconcileState,
   SkillSummary,
   SyncStatus,
 } from '../../shared/ipc'
 import {
+  COLLISION_STATES,
   staleDisclosures,
-  targetState,
+  targetsInStates,
   type StaleRegistryDisclosure,
 } from './cataloguePresentation'
 
@@ -40,8 +40,6 @@ export interface InstallWork {
   disclosures: StaleRegistryDisclosure[]
 }
 
-const COLLIDED: ReconcileState[] = ['external', 'other-registry']
-
 export interface InstallWorkOptions {
   acknowledgeStale: boolean
   /** Install over chosen targets that hold an Installation Collision. */
@@ -66,11 +64,12 @@ export function deriveInstallWork(
   let skipped = 0
   let skippedCollisions = 0
   for (const skill of skills) {
-    const targetsIn = (...states: ReconcileState[]) =>
-      chosenTargets.filter((t) => states.includes(targetState(skill, t)))
-    const collided = targetsIn(...COLLIDED)
+    const collided = targetsInStates(skill, chosenTargets, COLLISION_STATES)
     const replaceTargets = options.replace ? collided : []
-    const targets = targetsIn('not-installed', ...(options.replace ? COLLIDED : []))
+    const targets = targetsInStates(skill, chosenTargets, [
+      'not-installed',
+      ...(options.replace ? COLLISION_STATES : []),
+    ])
     const eligible = !skill.softDeleted && !options.isInstalledOnly(skill)
     if (eligible) skippedCollisions += collided.length - replaceTargets.length
     if (!eligible || targets.length === 0) {

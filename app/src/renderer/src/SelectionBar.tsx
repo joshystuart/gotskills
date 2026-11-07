@@ -109,7 +109,7 @@ function IdleBar({
         <span className="update-all-count" role="status" aria-live="polite">
           {count} selected · {work.skipped} skipped
           {collisions > 0
-            ? ` · ${collisions} existing ${collisions === 1 ? 'skill' : 'skills'} skipped`
+            ? ` · ${collisions} ${collisions === 1 ? 'target' : 'targets'} skipped as collisions`
             : null}
         </span>
         <div className="selection-chips">
