@@ -89,6 +89,62 @@ describe('deriveInstallWork', () => {
     expect(work.skipped).toBe(3)
   })
 
+  it('skips collided targets and counts them unless replacing', () => {
+    const GOOSE = '~/.config/goose/skills'
+    const work = deriveInstallWork(
+      [
+        skill('a', [
+          { target: CLAUDE, state: 'external' },
+          { target: SHARED, state: 'not-installed' },
+          { target: GOOSE, state: 'other-registry' },
+        ]),
+        skill('b', [
+          { target: CLAUDE, state: 'external' },
+          { target: SHARED, state: 'installed' },
+          { target: GOOSE, state: 'installed' },
+        ]),
+        skill('c', notInstalled(CLAUDE, SHARED, GOOSE)),
+      ],
+      [CLAUDE, SHARED, GOOSE],
+      { acknowledgeStale: false, isInstalledOnly: noneInstalledOnly }
+    )
+    expect(work.items.map((i) => [i.folderName, i.targets, i.replaceTargets])).toEqual([
+      ['a', [SHARED], []],
+      ['c', [CLAUDE, SHARED, GOOSE], []],
+    ])
+    expect(work.skipped).toBe(1)
+    expect(work.skippedCollisions).toBe(3)
+  })
+
+  it('includes collided targets and marks them for replacement when replacing', () => {
+    const GOOSE = '~/.config/goose/skills'
+    const work = deriveInstallWork(
+      [
+        skill('a', [
+          { target: CLAUDE, state: 'external' },
+          { target: SHARED, state: 'not-installed' },
+          { target: GOOSE, state: 'other-registry' },
+        ]),
+        skill('b', [
+          { target: CLAUDE, state: 'external' },
+          { target: SHARED, state: 'installed' },
+          { target: GOOSE, state: 'installed' },
+        ]),
+        skill('c', notInstalled(CLAUDE, SHARED, GOOSE)),
+        skill('removed', [{ target: CLAUDE, state: 'external' }], { softDeleted: true }),
+      ],
+      [CLAUDE, SHARED, GOOSE],
+      { acknowledgeStale: false, isInstalledOnly: noneInstalledOnly, replace: true }
+    )
+    expect(work.items.map((i) => [i.folderName, i.targets, i.replaceTargets])).toEqual([
+      ['a', [CLAUDE, SHARED, GOOSE], [CLAUDE, GOOSE]],
+      ['b', [CLAUDE], [CLAUDE]],
+      ['c', [CLAUDE, SHARED, GOOSE], []],
+    ])
+    expect(work.skipped).toBe(1)
+    expect(work.skippedCollisions).toBe(0)
+  })
+
   it('holds back stale skills unless acknowledged', () => {
     const skills = [
       skill('s', notInstalled(CLAUDE), { stale: true }),

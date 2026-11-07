@@ -5129,6 +5129,100 @@ describe('Catalogue multi-selection', () => {
       ).toBeInTheDocument()
     })
 
+    describe('over Installation Collisions', () => {
+      const COLLIDED = [
+        skill({
+          id: 'alpha',
+          name: 'Alpha',
+          description: 'a',
+          perTarget: [
+            { target: '~/.claude/skills', state: 'external', occupant: { kind: 'symlink' } },
+            { target: '~/.agents/skills', state: 'not-installed' },
+          ],
+        }),
+        skill({
+          id: 'beta',
+          name: 'Beta',
+          description: 'b',
+          perTarget: [
+            {
+              target: '~/.claude/skills',
+              state: 'other-registry',
+              occupant: { kind: 'registry', registryLabel: 'Team skills' },
+            },
+            { target: '~/.agents/skills', state: 'external', occupant: { kind: 'folder' } },
+          ],
+        }),
+      ]
+
+      function selectBoth(): void {
+        fireEvent.click(row('Alpha'))
+        fireEvent.click(row('Beta'), { shiftKey: true })
+      }
+
+      it('skips collided targets and says how many until Replace existing skills is on', async () => {
+        await renderList(COLLIDED)
+        selectBoth()
+        const replace = within(bar()).getByRole('checkbox', { name: 'Replace existing skills' })
+        expect(replace).not.toBeChecked()
+        expect(selectionCount()).toHaveTextContent(
+          '2 selected · 1 skipped · 3 existing skills skipped'
+        )
+        expect(within(bar()).getByRole('button', { name: 'Install (1)' })).toBeEnabled()
+
+        fireEvent.click(replace)
+        expect(selectionCount()).toHaveTextContent('2 selected · 0 skipped')
+        expect(selectionCount()).not.toHaveTextContent('existing')
+        expect(within(bar()).getByRole('button', { name: 'Install (2)' })).toBeEnabled()
+      })
+
+      it('asks before replacing, naming each skill and target, then sends the targets to replace', async () => {
+        const api = await renderList(COLLIDED, { install: vi.fn().mockResolvedValue({}) })
+        selectBoth()
+        fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Replace existing skills' }))
+
+        fireEvent.click(within(bar()).getByRole('button', { name: 'Install (2)' }))
+        const dialog = screen.getByRole('alertdialog', { name: 'Replace skills?' })
+        expect(
+          within(dialog)
+            .getAllByRole('listitem')
+            .map((item) => item.textContent)
+        ).toEqual([
+          'Alpha: Claude Code — link removed',
+          'Beta: Claude Code — replaces the copy from Team skills',
+          'Beta: Cursor — moved to the Trash',
+        ])
+        await act(async () => {
+          within(dialog).getByRole('button', { name: 'Cancel' }).click()
+        })
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+        expect(api.install).not.toHaveBeenCalled()
+        expect(within(bar()).getByRole('button', { name: 'Install (2)' })).toBeInTheDocument()
+
+        fireEvent.click(within(bar()).getByRole('button', { name: 'Install (2)' }))
+        await act(async () => {
+          within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace' }).click()
+        })
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+        expect(vi.mocked(api.install).mock.calls.map(([req]) => req)).toEqual([
+          {
+            registryId: REG,
+            folderName: 'alpha',
+            targets: ['~/.claude/skills', '~/.agents/skills'],
+            replaceTargets: ['~/.claude/skills'],
+            mirrorRevision: 'deadbeef',
+          },
+          {
+            registryId: REG,
+            folderName: 'beta',
+            targets: ['~/.claude/skills', '~/.agents/skills'],
+            replaceTargets: ['~/.claude/skills', '~/.agents/skills'],
+            mirrorRevision: 'deadbeef',
+          },
+        ])
+      })
+    })
+
     it('a reload that marks a selected skill installed lowers the count', async () => {
       let push: (() => void) | undefined
       let current = INSTALLABLE

@@ -1898,3 +1898,10 @@ button:disabled {
   gap: 4px;
   font-size: 0.75rem;
 }
+
+.selection-replace {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
