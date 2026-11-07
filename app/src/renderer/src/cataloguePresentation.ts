@@ -267,6 +267,11 @@ const ATTENTION_LABELS: [ReconcileState, AttentionLabel][] = [
   ['removed-from-registry', { tone: 'bad', glyph: '×', text: 'Removed', cellText: 'Removed' }],
   ['orphaned', { tone: 'quiet', glyph: '⊘', text: 'Orphaned', cellText: 'Orphaned' }],
   ['update-available', { tone: 'warn', glyph: '↑', text: 'Update ready', cellText: 'Update' }],
+  ['external', { tone: 'quiet', glyph: '·', text: 'External', cellText: 'External' }],
+  [
+    'other-registry',
+    { tone: 'quiet', glyph: '·', text: 'Other registry', cellText: 'Other registry' },
+  ],
 ]
 
 export interface RowAttention {

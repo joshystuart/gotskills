@@ -671,7 +671,7 @@ describe('App shell', () => {
     await screen.findByText('External skill')
     fireEvent.click(screen.getByText('External skill'))
 
-    expect(within(screen.getByRole('option')).getByText('—')).toBeInTheDocument()
+    expect(within(screen.getByRole('option')).getByText('External')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
     expect(uninstall).not.toHaveBeenCalled()
   })
@@ -1477,7 +1477,7 @@ describe('Catalogue table', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows a dash for a skill installed nowhere and keeps an update visible on its row', async () => {
+  it('shows the collision label for a skill installed nowhere and keeps an update visible on its row', async () => {
     const skills = [
       skill({
         id: 'alpha',
@@ -1502,8 +1502,8 @@ describe('Catalogue table', () => {
     await screen.findByText('Alpha')
     const [alpha, beta] = screen.getAllByRole('option')
 
-    expect(within(alpha).getByText('—')).toBeInTheDocument()
-    expect(within(alpha).getByText('Not installed')).toBeInTheDocument()
+    expect(within(alpha).getByText('External')).toBeInTheDocument()
+    expect(within(alpha).getByText('External in Claude Code')).toBeInTheDocument()
     expect(within(beta).getByText('2')).toBeInTheDocument()
     expect(within(beta).getByText('Update')).toBeInTheDocument()
     expect(
@@ -1582,6 +1582,90 @@ describe('Catalogue table', () => {
     expect(
       within(row).getByText('Installed in Claude Code, Cursor. Needs repair in Cursor')
     ).toBeInTheDocument()
+  })
+
+  it('shows External with its targets instead of a bare dash for an external-only skill', async () => {
+    const skills = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'not-installed' },
+          { target: '~/.agents/skills', state: 'external' },
+        ],
+      }),
+    ]
+    render(<App api={fakeApi(syncStatus(), skills)} />)
+    await screen.findByText('Alpha')
+    const row = screen.getByRole('option')
+
+    expect(within(row).getByText('External')).toBeInTheDocument()
+    expect(within(row).queryByText('—')).not.toBeInTheDocument()
+    expect(within(row).queryByText('Not installed')).not.toBeInTheDocument()
+    expect(within(row).getByText('External in Cursor')).toBeInTheDocument()
+    expect(within(row).getByRole('tooltip', { hidden: true })).toHaveTextContent('Cursor')
+  })
+
+  it('shows Other registry for a skill another registry installed', async () => {
+    const skills = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        perTarget: [{ target: '~/.claude/skills', state: 'other-registry' }],
+      }),
+    ]
+    render(<App api={fakeApi(syncStatus(), skills)} />)
+    await screen.findByText('Alpha')
+    const row = screen.getByRole('option')
+
+    expect(within(row).getByText('Other registry')).toBeInTheDocument()
+    expect(within(row).getByText('Other registry in Claude Code')).toBeInTheDocument()
+  })
+
+  it('counts only Got Skills installs and shows External beside an install', async () => {
+    const skills = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'installed' },
+          { target: '~/.agents/skills', state: 'external' },
+        ],
+      }),
+    ]
+    render(<App api={fakeApi(syncStatus(), skills)} />)
+    await screen.findByText('Alpha')
+    const row = screen.getByRole('option')
+
+    expect(within(row).getByText('1')).toBeInTheDocument()
+    expect(within(row).getByText('External')).toBeInTheDocument()
+    expect(
+      within(row).getByText('Installed in Claude Code. External in Cursor')
+    ).toBeInTheDocument()
+  })
+
+  it('shows the update label over External when both apply', async () => {
+    const skills = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'update-available' },
+          { target: '~/.agents/skills', state: 'external' },
+        ],
+      }),
+    ]
+    render(<App api={fakeApi(syncStatus(), skills)} />)
+    await screen.findByText('Alpha')
+    const row = screen.getByRole('option')
+
+    expect(within(row).getByText('1')).toBeInTheDocument()
+    expect(within(row).getByText('Update')).toBeInTheDocument()
+    expect(within(row).queryByText('External')).not.toBeInTheDocument()
   })
 
   it('hides the column header from assistive tech', async () => {
@@ -1731,7 +1815,7 @@ describe('Catalogue table', () => {
     render(<App api={api} />)
     fireEvent.click(await screen.findByText('Alpha'))
 
-    expect(within(screen.getByRole('option')).getByText('—')).toBeInTheDocument()
+    expect(within(screen.getByRole('option')).getByText('Other registry')).toBeInTheDocument()
     const onThisMac = await screen.findByRole('region', { name: 'On this Mac' })
     expect(within(onThisMac).getByText('Held by another registry')).toBeInTheDocument()
     expect(
@@ -1908,9 +1992,9 @@ describe('Catalogue table', () => {
     ['update-available', '2'],
     ['needs-repair', '2'],
     ['removed-from-registry', '2'],
-    ['external', '—'],
+    ['external', 'External'],
     ['orphaned', '—'],
-    ['other-registry', '—'],
+    ['other-registry', 'Other registry'],
     ['not-installed', '—'],
   ] as const)('shows %s on both targets as %s', async (state, shown) => {
     const skills = [
