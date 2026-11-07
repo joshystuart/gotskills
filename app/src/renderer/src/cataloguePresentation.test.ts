@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import type { RegistrySyncStatus, SkillSummary, SyncStatus } from '../../shared/ipc'
+import type {
+  InstallTargetStatus,
+  RegistrySyncStatus,
+  SkillSummary,
+  SyncStatus,
+} from '../../shared/ipc'
 import {
   ACCESS_REQUIRED_GUIDANCE,
+  replaceOutcome,
+  rowAttention,
+  skillsInView,
   bannerMessage,
   deriveUpdateItems,
   deriveUpdateWork,
@@ -392,4 +400,109 @@ it.each([
   expect(bannerMessage(syncStatus({ phase: 'failed', reason, registries: [failed] }))).toContain(
     label
   )
+})
+
+function target(id: string, label: string): InstallTargetStatus {
+  return { id, label, shared: false, visible: true, agents: [] }
+}
+
+const CLAUDE = target('~/.claude/skills', 'Claude Code')
+const JUNIE = target('~/.junie/skills', 'Junie')
+const PI = target('~/.pi/agent/skills', 'Pi')
+
+describe('rowAttention', () => {
+  it('labels external and other-registry targets quietly', () => {
+    const external = rowAttention(
+      skill({
+        perTarget: [
+          { target: CLAUDE.id, state: 'not-installed' },
+          { target: JUNIE.id, state: 'external' },
+          { target: PI.id, state: 'external' },
+        ],
+      }),
+      [CLAUDE, JUNIE, PI]
+    )
+    expect(external?.label).toMatchObject({ tone: 'quiet', cellText: 'External' })
+    expect(external?.targets.map((t) => t.label)).toEqual(['Junie', 'Pi'])
+
+    const other = rowAttention(
+      skill({ perTarget: [{ target: CLAUDE.id, state: 'other-registry' }] }),
+      [CLAUDE]
+    )
+    expect(other?.label).toMatchObject({ tone: 'quiet', cellText: 'Other registry' })
+  })
+
+  it('ranks a collision below repair, removed, orphaned and update', () => {
+    for (const [state, cellText] of [
+      ['needs-repair', 'Repair'],
+      ['removed-from-registry', 'Removed'],
+      ['update-available', 'Update'],
+    ] as const) {
+      const attention = rowAttention(
+        skill({
+          perTarget: [
+            { target: CLAUDE.id, state: 'external' },
+            { target: JUNIE.id, state },
+          ],
+        }),
+        [CLAUDE, JUNIE]
+      )
+      expect(attention?.label.cellText).toBe(cellText)
+    }
+    const orphaned = rowAttention(
+      skill({
+        orphaned: true,
+        perTarget: [
+          { target: CLAUDE.id, state: 'other-registry' },
+          { target: JUNIE.id, state: 'installed' },
+        ],
+      }),
+      [CLAUDE, JUNIE]
+    )
+    expect(orphaned?.label.cellText).toBe('Orphaned')
+  })
+
+  it('shows the collision on a row that is also installed with nothing more urgent', () => {
+    const attention = rowAttention(
+      skill({
+        perTarget: [
+          { target: CLAUDE.id, state: 'installed' },
+          { target: JUNIE.id, state: 'external' },
+        ],
+      }),
+      [CLAUDE, JUNIE]
+    )
+    expect(attention?.label.cellText).toBe('External')
+    expect(attention?.targets).toEqual([JUNIE])
+  })
+})
+
+describe('skillsInView', () => {
+  it('keeps skills that only collide out of the Installed view', () => {
+    const skills = [
+      skill({ id: 'r1/ext', perTarget: [{ target: CLAUDE.id, state: 'external' }] }),
+      skill({ id: 'r1/other', perTarget: [{ target: CLAUDE.id, state: 'other-registry' }] }),
+      skill({ id: 'r1/ours', perTarget: [{ target: CLAUDE.id, state: 'installed' }] }),
+    ]
+    expect(skillsInView(skills, 'installed').map((s) => s.id)).toEqual(['r1/ours'])
+  })
+})
+
+describe('replaceOutcome', () => {
+  it('says what happens to what occupies a collided target', () => {
+    const subject = skill({
+      perTarget: [
+        { target: CLAUDE.id, state: 'external', occupant: { kind: 'symlink' } },
+        { target: JUNIE.id, state: 'external', occupant: { kind: 'folder' } },
+        {
+          target: PI.id,
+          state: 'other-registry',
+          occupant: { kind: 'registry', registryLabel: 'Team skills' },
+        },
+      ],
+    })
+    expect(replaceOutcome(subject, CLAUDE.id)).toBe('link removed')
+    expect(replaceOutcome(subject, JUNIE.id)).toBe('moved to the Trash')
+    expect(replaceOutcome(subject, PI.id)).toBe('replaces the copy from Team skills')
+  })
 })

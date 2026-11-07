@@ -1,7 +1,12 @@
 import type { JSX } from 'react'
 import type { InstallTargetStatus, RegistryRecord, SkillSummary } from '../../shared/ipc'
 import type { ClickModifiers } from './catalogueSelection'
-import { registryDotColour, rowAttention, targetsWithSkill } from './cataloguePresentation'
+import {
+  isCollision,
+  registryDotColour,
+  rowAttention,
+  targetsWithSkill,
+} from './cataloguePresentation'
 
 interface CatalogueListProps {
   skills: SkillSummary[]
@@ -26,7 +31,8 @@ function InstalledCell({
   targets: InstallTargetStatus[]
 }): JSX.Element {
   const installed = targetsWithSkill(skill, targets)
-  if (installed.length === 0) {
+  const attention = rowAttention(skill, targets)
+  if (installed.length === 0 && !attention) {
     return (
       <span className="installed-cell">
         <span className="sr-only">Not installed</span>
@@ -34,15 +40,20 @@ function InstalledCell({
       </span>
     )
   }
-  const attention = rowAttention(skill, targets)
   const spoken = [
-    `Installed in ${labelList(installed)}`,
+    ...(installed.length > 0 ? [`Installed in ${labelList(installed)}`] : []),
     ...(attention ? [`${attention.label.text} in ${labelList(attention.targets)}`] : []),
   ].join('. ')
+  const tooltip = [
+    ...(installed.length > 0 ? [labelList(installed)] : []),
+    ...(attention && isCollision(attention.state)
+      ? [`${attention.label.text}: ${labelList(attention.targets)}`]
+      : []),
+  ].join(' · ')
   return (
     <span className="installed-cell">
       <span className="sr-only">{spoken}</span>
-      <span aria-hidden="true">{installed.length}</span>
+      {installed.length > 0 ? <span aria-hidden="true">{installed.length}</span> : null}
       {attention ? (
         <span aria-hidden="true" className={`installed-attention agent-${attention.label.tone}`}>
           <span className="glyph">{attention.label.glyph}</span>
@@ -50,7 +61,7 @@ function InstalledCell({
         </span>
       ) : null}
       <span role="tooltip" aria-hidden="true" className="installed-targets">
-        {labelList(installed)}
+        {tooltip}
       </span>
     </span>
   )

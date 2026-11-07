@@ -7,7 +7,9 @@ import type {
 } from '../../shared/ipc'
 import { shortSha } from '../../shared/shortSha'
 import {
+  collidedTargets,
   formatUpdatedAt,
+  isCollision,
   staleSkillNotice,
   targetLabel,
   targetState,
@@ -21,6 +23,8 @@ interface InstallActions {
   updateTargets: InstallTargetId[]
   onInstall: (targets: InstallTargetId[]) => void
   onUpdate: (targets: InstallTargetId[]) => void
+  /** Asks to install over collided targets; the caller confirms first. */
+  onReplace: (targets: InstallTargetId[]) => void
 }
 
 interface RepairRemove {
@@ -61,9 +65,9 @@ export function SkillDetailPanel({
   onAcknowledgedStaleChange,
   onClose,
 }: SkillDetailPanelProps): JSX.Element {
-  const lacking = targets
-    .map((target) => target.id)
-    .filter((target) => targetState(skill, target) === 'not-installed')
+  const targetIds = targets.map((target) => target.id)
+  const lacking = targetIds.filter((target) => targetState(skill, target) === 'not-installed')
+  const collided = collidedTargets(skill, targetIds)
   const mainAction =
     lacking.length > 0
       ? {
@@ -71,13 +75,19 @@ export function SkillDetailPanel({
           busy: 'Installing…',
           run: () => installActions.onInstall(lacking),
         }
-      : installActions.updateTargets.length > 0
+      : collided.length > 0
         ? {
-            idle: 'Update',
-            busy: 'Updating…',
-            run: () => installActions.onUpdate(installActions.updateTargets),
+            idle: 'Replace all',
+            busy: 'Replacing…',
+            run: () => installActions.onReplace(collided),
           }
-        : null
+        : installActions.updateTargets.length > 0
+          ? {
+              idle: 'Update',
+              busy: 'Updating…',
+              run: () => installActions.onUpdate(installActions.updateTargets),
+            }
+          : null
   const targetActions = (target: InstallTargetStatus) => {
     const state = targetState(skill, target.id)
     return [
@@ -87,6 +97,13 @@ export function SkillDetailPanel({
         shown: installActions.visible && state === 'not-installed',
         disabled: installActions.disabled,
         run: installActions.onInstall,
+      },
+      {
+        text: 'Replace',
+        label: `Replace in ${target.label}`,
+        shown: installActions.visible && isCollision(state),
+        disabled: installActions.disabled,
+        run: installActions.onReplace,
       },
       {
         text: 'Update',

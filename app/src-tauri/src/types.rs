@@ -161,6 +161,24 @@ pub struct PerTargetState {
     pub state: ReconcileState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occupant: Option<CollisionOccupant>,
+}
+
+/// What holds an install target that has an Installation Collision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
+pub enum CollisionOccupant {
+    /// A symlink from outside the app; replacing removes only the link.
+    Symlink,
+    /// A real folder from outside the app; replacing moves it to the Trash.
+    Folder,
+    /// Another registry's install, named by its Registry Name.
+    Registry { registry_label: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,6 +296,9 @@ pub struct InstallRequest {
     pub mirror_revision: String,
     #[serde(default)]
     pub acknowledge_stale: Option<bool>,
+    /// Collided targets the user chose to install over; a subset of `targets`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replace_targets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,6 +400,8 @@ pub struct ReconcileEntry {
     pub mirror_hash: Option<String>,
     pub disk: Vec<DiskProbe>,
     pub lock_agrees: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occupant: Option<CollisionOccupant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -631,9 +654,34 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(request.acknowledge_stale, None);
+        assert!(request.replace_targets.is_empty());
         let update: UpdateRegistryRequest =
             serde_json::from_value(json!({ "id": "r", "autoUpdate": true })).unwrap();
         assert_eq!(update.auto_update, Some(true));
+    }
+
+    #[test]
+    fn collision_occupants_are_tagged_by_kind() {
+        assert_eq!(
+            serde_json::to_value(CollisionOccupant::Symlink).unwrap(),
+            json!({ "kind": "symlink" })
+        );
+        assert_eq!(
+            serde_json::to_value(CollisionOccupant::Registry {
+                registry_label: "acme/skills".into()
+            })
+            .unwrap(),
+            json!({ "kind": "registry", "registryLabel": "acme/skills" })
+        );
+        let request: InstallRequest = serde_json::from_value(json!({
+            "registryId": "r", "folderName": "f", "targets": ["~/.agents/skills"],
+            "mirrorRevision": "abc", "replaceTargets": ["~/.agents/skills"]
+        }))
+        .unwrap();
+        assert_eq!(
+            request.replace_targets,
+            vec!["~/.agents/skills".to_string()]
+        );
     }
 
     #[test]

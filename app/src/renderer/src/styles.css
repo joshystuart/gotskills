@@ -720,7 +720,13 @@ button:disabled {
 
 .installed-attention {
   display: inline-flex;
+  min-width: 0;
   gap: 4px;
+}
+
+.installed-attention > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .installed-targets {
@@ -1869,6 +1875,20 @@ button:disabled {
 .modal-body {
   margin: 0 0 20px;
   color: var(--muted);
+}
+
+.modal-body p {
+  margin: 0;
+}
+
+.replace-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.replace-list ul {
+  margin: 2px 0 0;
+  padding-left: 18px;
 }
 
 .modal-actions {

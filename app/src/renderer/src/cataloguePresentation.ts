@@ -267,11 +267,49 @@ const ATTENTION_LABELS: [ReconcileState, AttentionLabel][] = [
   ['removed-from-registry', { tone: 'bad', glyph: '×', text: 'Removed', cellText: 'Removed' }],
   ['orphaned', { tone: 'quiet', glyph: '⊘', text: 'Orphaned', cellText: 'Orphaned' }],
   ['update-available', { tone: 'warn', glyph: '↑', text: 'Update ready', cellText: 'Update' }],
+  ['external', { tone: 'quiet', glyph: '·', text: 'External', cellText: 'External' }],
+  [
+    'other-registry',
+    { tone: 'quiet', glyph: '·', text: 'Held by another registry', cellText: 'Other registry' },
+  ],
 ]
 
 export interface RowAttention {
+  state: ReconcileState
   label: AttentionLabel
   targets: InstallTargetStatus[]
+}
+
+const COLLISION_STATES: ReconcileState[] = ['external', 'other-registry']
+
+/** Whether a target state is an Installation Collision the user may replace. */
+export function isCollision(state: ReconcileState): boolean {
+  return COLLISION_STATES.includes(state)
+}
+
+/** The targets among `targets` where the skill has an Installation Collision. */
+export function collidedTargets(
+  skill: SkillSummary,
+  targets: InstallTargetId[]
+): InstallTargetId[] {
+  return targets.filter((target) => isCollision(targetState(skill, target)))
+}
+
+/** What replacing the skill in a collided target does to what is there now. */
+export function replaceOutcome(skill: SkillSummary, target: InstallTargetId): string {
+  const reported = skill.perTarget.find((p) => p.target === target)
+  switch (reported?.occupant?.kind) {
+    case 'symlink':
+      return 'link removed'
+    case 'folder':
+      return 'moved to the Trash'
+    case 'registry':
+      return `replaces the copy from ${reported.occupant.registryLabel}`
+    default:
+      return reported?.state === 'other-registry'
+        ? 'replaces the copy from another registry'
+        : 'moved to the Trash'
+  }
 }
 
 const INSTALLED_LIKE: ReconcileState[] = [
@@ -293,7 +331,7 @@ export function rowAttention(
 ): RowAttention | null {
   for (const [state, label] of ATTENTION_LABELS) {
     const held = targets.filter((target) => holdsState(skill, target.id, state))
-    if (held.length > 0) return { label, targets: held }
+    if (held.length > 0) return { state, label, targets: held }
   }
   return null
 }

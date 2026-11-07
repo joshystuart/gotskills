@@ -9,10 +9,11 @@ use rusqlite::Connection;
 
 use crate::env::Environment;
 use crate::error::AppResult;
+use crate::registries::{list_registries, registry_label};
 use crate::short_sha::short_sha;
 use crate::types::{
-    skill_id, DiskProbe, InstallRecord, PerTargetState, ReconcileEntry, ReconcileReport,
-    ReconcileState,
+    skill_id, CollisionOccupant, DiskProbe, InstallRecord, PerTargetState, ReconcileEntry,
+    ReconcileReport, ReconcileState,
 };
 
 use super::agents::AgentDirectory;
@@ -119,6 +120,27 @@ fn derive_state(input: &DeriveInput) -> ReconcileState {
     }
 }
 
+fn collision_occupant(
+    state: ReconcileState,
+    occupant: Option<&InstallRecord>,
+    probes: &[DiskProbe],
+    registry_labels: &HashMap<String, String>,
+) -> Option<CollisionOccupant> {
+    match state {
+        ReconcileState::External if probes.iter().any(|p| p.is_symlink) => {
+            Some(CollisionOccupant::Symlink)
+        }
+        ReconcileState::External => Some(CollisionOccupant::Folder),
+        ReconcileState::OtherRegistry => occupant.map(|rec| CollisionOccupant::Registry {
+            registry_label: registry_labels
+                .get(&rec.registry_id)
+                .cloned()
+                .unwrap_or_else(|| rec.registry_id.clone()),
+        }),
+        _ => None,
+    }
+}
+
 /// Inputs of [`reconcile`].
 pub struct ReconcileDeps<'a> {
     pub conn: &'a Connection,
@@ -169,6 +191,10 @@ pub fn reconcile(deps: &ReconcileDeps) -> AppResult<ReconcileReport> {
         .map(|rec| ((rec.target.as_str(), rec.folder_name.as_str()), rec))
         .collect();
     let home = &deps.environment.home;
+    let registry_labels: HashMap<String, String> = list_registries(deps.conn, true)?
+        .iter()
+        .map(|registry| (registry.id.clone(), registry_label(registry, home)))
+        .collect();
     let targets: Vec<String> = detect_install_targets(
         deps.environment,
         deps.agents,
@@ -202,6 +228,7 @@ pub fn reconcile(deps: &ReconcileDeps) -> AppResult<ReconcileReport> {
                 mirror_hash,
                 probes: &probes,
             });
+            let occupant = collision_occupant(state, occupant, &probes, &registry_labels);
             entries.push(ReconcileEntry {
                 registry_id: meta.registry_id.clone(),
                 folder_name: meta.folder_name.clone(),
@@ -212,6 +239,7 @@ pub fn reconcile(deps: &ReconcileDeps) -> AppResult<ReconcileReport> {
                 mirror_hash: meta.head_content_hash.clone(),
                 disk: probes,
                 lock_agrees: lock_agrees(home, &meta.folder_name, ours.is_some()),
+                occupant,
             });
         }
     }
@@ -240,6 +268,7 @@ pub fn per_target_from_reconcile(
                     .get(&entry.target)
                     .map(|rec| rec.provenance_sha.as_str()),
             ),
+            occupant: entry.occupant.clone(),
         })
         .collect()
 }
@@ -281,12 +310,17 @@ mod tests {
 
     impl Fixture {
         fn install(&self, targets: &[&str]) {
+            self.install_replacing(targets, &[]);
+        }
+
+        fn install_replacing(&self, targets: &[&str], replace: &[&str]) {
             let deps = InstallDeps {
                 conn: &self.conn,
                 registry_id: REGISTRY,
                 mirror_path: self.mirror.path(),
                 environment: &self.env,
                 current_revision: "rev",
+                trash: &|_| unreachable!("nothing is replaced"),
             };
             let request = InstallRequest {
                 registry_id: REGISTRY.into(),
@@ -294,6 +328,7 @@ mod tests {
                 targets: targets.iter().map(|t| t.to_string()).collect(),
                 mirror_revision: "rev".into(),
                 acknowledge_stale: None,
+                replace_targets: replace.iter().map(|t| t.to_string()).collect(),
             };
             install_skill(&deps, &request).unwrap();
         }
@@ -316,6 +351,15 @@ mod tests {
                 .find(|e| e.target == target)
                 .unwrap_or_else(|| panic!("no entry for {target}"))
                 .state
+        }
+
+        fn occupant(&self, target: &str) -> Option<CollisionOccupant> {
+            self.report()
+                .entries
+                .into_iter()
+                .find(|e| e.target == target)
+                .unwrap_or_else(|| panic!("no entry for {target}"))
+                .occupant
         }
 
         fn skill_dir(&self, rel: &str) -> std::path::PathBuf {
@@ -418,14 +462,53 @@ mod tests {
         fs::write(f.skill_dir(".agents/skills").join("SKILL.md"), "x").unwrap();
         assert_eq!(f.state(CLAUDE), ReconcileState::NotInstalled);
         assert_eq!(f.state(SHARED), ReconcileState::External);
+        assert_eq!(f.occupant(SHARED), Some(CollisionOccupant::Folder));
+        assert_eq!(f.occupant(CLAUDE), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_outside_symlink_is_external_with_a_symlink_occupant() {
+        let f = fixture(&["claude-code"]);
+        let own = f.home.path().join("my-skills/alpha");
+        fs::create_dir_all(&own).unwrap();
+        fs::create_dir_all(f.home.path().join(".claude/skills")).unwrap();
+        std::os::unix::fs::symlink(&own, f.skill_dir(".claude/skills")).unwrap();
+        assert_eq!(f.state(CLAUDE), ReconcileState::External);
+        assert_eq!(f.occupant(CLAUDE), Some(CollisionOccupant::Symlink));
     }
 
     #[test]
     fn another_registrys_record_is_other_registry() {
         let f = fixture(&["claude-code"]);
         add_registry(&f.conn, "reg-b", true, false);
+        f.conn
+            .execute(
+                "UPDATE registry SET name = 'Team skills' WHERE id = 'reg-b'",
+                [],
+            )
+            .unwrap();
         upsert_install_record(&f.conn, &record(CLAUDE, "alpha", "reg-b")).unwrap();
         assert_eq!(f.state(CLAUDE), ReconcileState::OtherRegistry);
+        assert_eq!(
+            f.occupant(CLAUDE),
+            Some(CollisionOccupant::Registry {
+                registry_label: "Team skills".into()
+            })
+        );
+    }
+
+    #[test]
+    fn replacing_another_registrys_install_makes_it_installed_here() {
+        let f = fixture(&["claude-code"]);
+        add_registry(&f.conn, "reg-b", true, false);
+        upsert_install_record(&f.conn, &record(CLAUDE, "alpha", "reg-b")).unwrap();
+        fs::create_dir_all(f.skill_dir(".claude/skills")).unwrap();
+
+        f.install_replacing(&[CLAUDE], &[CLAUDE]);
+
+        assert_eq!(f.state(CLAUDE), ReconcileState::Installed);
+        assert_eq!(f.occupant(CLAUDE), None);
     }
 
     #[cfg(unix)]

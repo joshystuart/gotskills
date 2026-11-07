@@ -181,6 +181,7 @@ fn per_target_from_reconcile(
                     .get(entry.target.as_str())
                     .map(|record| record.provenance_sha.as_str()),
             ),
+            occupant: entry.occupant.clone(),
         })
         .collect()
 }
@@ -513,6 +514,7 @@ mod tests {
                 mirror_hash: None,
                 disk: vec![],
                 lock_agrees: true,
+                occupant: None,
             }],
         }
     }
@@ -680,6 +682,7 @@ mod tests {
                 target: "claude-code".into(),
                 state: ReconcileState::UpdateAvailable,
                 installed_version: Some("1234567".into()),
+                occupant: None,
             }]
         );
     }

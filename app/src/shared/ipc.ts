@@ -71,11 +71,17 @@ export interface AutoUpdateResult {
   failed: { folderName: string; name: string; reason: string }[]
 }
 
+/** What holds a target with an Installation Collision. */
+export type CollisionOccupant =
+  { kind: 'symlink' } | { kind: 'folder' } | { kind: 'registry'; registryLabel: string }
+
 export interface PerTargetState {
   target: InstallTargetId
   state: ReconcileState
   /** Short provenance SHA of the installed snapshot, when installed. */
   installedVersion?: string
+  /** Present only on `external` and `other-registry` targets. */
+  occupant?: CollisionOccupant
 }
 
 export interface SkillSummary {
@@ -197,6 +203,8 @@ export interface InstallRequest {
   mirrorRevision: string
   /** Required to install/update from a stale Registry Snapshot. */
   acknowledgeStale?: boolean
+  /** Collided targets the user chose to install over; a subset of `targets`. */
+  replaceTargets?: InstallTargetId[]
 }
 
 export interface TargetResult {
@@ -265,6 +273,7 @@ export interface ReconcileEntry {
   mirrorHash?: string
   disk: DiskProbe[]
   lockAgrees: boolean
+  occupant?: CollisionOccupant
 }
 
 export interface ReconcileReport {

@@ -520,6 +520,7 @@ mod tests {
                 mirror_path: &fx.config.mirror_path,
                 environment: &environment,
                 current_revision: &synced.revision,
+                trash: &|_| unreachable!("nothing is replaced"),
             },
             &InstallRequest {
                 registry_id: fx.config.registry_id.clone(),
@@ -527,6 +528,7 @@ mod tests {
                 targets: vec!["~/.agents/skills".into()],
                 mirror_revision: synced.revision.clone(),
                 acknowledge_stale: None,
+                replace_targets: Vec::new(),
             },
         )
         .unwrap();

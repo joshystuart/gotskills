@@ -671,7 +671,7 @@ describe('App shell', () => {
     await screen.findByText('External skill')
     fireEvent.click(screen.getByText('External skill'))
 
-    expect(within(screen.getByRole('option')).getByText('—')).toBeInTheDocument()
+    expect(within(screen.getByRole('option')).getByText('External')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
     expect(uninstall).not.toHaveBeenCalled()
   })
@@ -1477,7 +1477,7 @@ describe('Catalogue table', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows a dash for a skill installed nowhere and keeps an update visible on its row', async () => {
+  it('shows External for a skill only outside the app and keeps an update visible on its row', async () => {
     const skills = [
       skill({
         id: 'alpha',
@@ -1502,8 +1502,13 @@ describe('Catalogue table', () => {
     await screen.findByText('Alpha')
     const [alpha, beta] = screen.getAllByRole('option')
 
-    expect(within(alpha).getByText('—')).toBeInTheDocument()
-    expect(within(alpha).getByText('Not installed')).toBeInTheDocument()
+    expect(within(alpha).queryByText('—')).not.toBeInTheDocument()
+    expect(within(alpha).queryByText('Not installed')).not.toBeInTheDocument()
+    expect(within(alpha).getByText('External')).toBeInTheDocument()
+    expect(within(alpha).getByText('External in Claude Code')).toBeInTheDocument()
+    expect(within(alpha).getByRole('tooltip', { hidden: true })).toHaveTextContent(
+      /^External: Claude Code$/
+    )
     expect(within(beta).getByText('2')).toBeInTheDocument()
     expect(within(beta).getByText('Update')).toBeInTheDocument()
     expect(
@@ -1731,7 +1736,7 @@ describe('Catalogue table', () => {
     render(<App api={api} />)
     fireEvent.click(await screen.findByText('Alpha'))
 
-    expect(within(screen.getByRole('option')).getByText('—')).toBeInTheDocument()
+    expect(within(screen.getByRole('option')).getByText('Other registry')).toBeInTheDocument()
     const onThisMac = await screen.findByRole('region', { name: 'On this Mac' })
     expect(within(onThisMac).getByText('Held by another registry')).toBeInTheDocument()
     expect(
@@ -1908,9 +1913,9 @@ describe('Catalogue table', () => {
     ['update-available', '2'],
     ['needs-repair', '2'],
     ['removed-from-registry', '2'],
-    ['external', '—'],
+    ['external', 'External'],
     ['orphaned', '—'],
-    ['other-registry', '—'],
+    ['other-registry', 'Other registry'],
     ['not-installed', '—'],
   ] as const)('shows %s on both targets as %s', async (state, shown) => {
     const skills = [
@@ -3032,7 +3037,7 @@ describe('Catalogue provenance and conflict', () => {
       .fn()
       .mockRejectedValue(
         new InstallationCollisionError(
-          '"alpha" is already installed for cursor from another registry. Uninstall it first.',
+          '"alpha" is already installed for cursor from another registry. Choose Replace to install over it.',
           'managed',
           'alpha',
           '~/.agents/skills'
@@ -3052,7 +3057,7 @@ describe('Catalogue provenance and conflict', () => {
     await act(async () => {
       ;(await screen.findByRole('button', { name: 'Install to all' })).click()
     })
-    expect(await screen.findByRole('alert')).toHaveTextContent(/Uninstall it first/i)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Choose Replace to install over it/i)
   })
 
   it('offers uninstall but not install or update for an orphaned installation', async () => {
@@ -5091,6 +5096,98 @@ describe('Catalogue multi-selection', () => {
       expect(await within(bar()).findByRole('button', { name: 'Install (1)' })).toBeInTheDocument()
       expect(selectionCount()).toHaveTextContent('3 selected · 2 skipped')
     })
+
+    describe('over existing skills', () => {
+      const COLLIDING = [
+        skill({
+          id: 'alpha',
+          name: 'Alpha',
+          description: 'a',
+          perTarget: [
+            { target: '~/.claude/skills', state: 'external', occupant: { kind: 'symlink' } },
+            { target: '~/.agents/skills', state: 'not-installed' },
+          ],
+        }),
+        skill({
+          id: 'beta',
+          name: 'Beta',
+          description: 'b',
+          perTarget: [
+            { target: '~/.claude/skills', state: 'external', occupant: { kind: 'folder' } },
+            {
+              target: '~/.agents/skills',
+              state: 'other-registry',
+              occupant: { kind: 'registry', registryLabel: 'Team skills' },
+            },
+          ],
+        }),
+      ]
+
+      function selectBoth(): void {
+        fireEvent.click(row('Alpha'))
+        fireEvent.click(row('Beta'), { shiftKey: true })
+      }
+
+      it('skips collided targets by default, says how many, and includes them once Replace is on', async () => {
+        await renderList(COLLIDING)
+        selectBoth()
+        expect(selectionCount()).toHaveTextContent(
+          '2 selected · 1 skipped · 3 targets with an existing skill left alone'
+        )
+        expect(within(bar()).getByRole('button', { name: 'Install (1)' })).toBeEnabled()
+        const replace = within(bar()).getByRole('checkbox', { name: 'Replace existing skills' })
+        expect(replace).not.toBeChecked()
+
+        fireEvent.click(replace)
+        expect(selectionCount()).toHaveTextContent(/^2 selected · 0 skipped$/)
+        expect(within(bar()).getByRole('button', { name: 'Install (2)' })).toBeEnabled()
+      })
+
+      it('confirms what each skill and target loses before replacing, and runs nothing on cancel', async () => {
+        const install = vi.fn().mockResolvedValue({})
+        await renderList(COLLIDING, { install })
+        selectBoth()
+        fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Replace existing skills' }))
+
+        fireEvent.click(within(bar()).getByRole('button', { name: 'Install (2)' }))
+        const dialog = screen.getByRole('alertdialog', { name: 'Replace existing skills?' })
+        expect(
+          within(within(dialog).getByRole('list', { name: 'Targets to replace for Alpha' }))
+            .getAllByRole('listitem')
+            .map((item) => item.textContent)
+        ).toEqual(['Claude Code: link removed'])
+        expect(
+          within(within(dialog).getByRole('list', { name: 'Targets to replace for Beta' }))
+            .getAllByRole('listitem')
+            .map((item) => item.textContent)
+        ).toEqual(['Claude Code: moved to the Trash', 'Cursor: replaces the copy from Team skills'])
+
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+        expect(install).not.toHaveBeenCalled()
+
+        fireEvent.click(within(bar()).getByRole('button', { name: 'Install (2)' }))
+        await act(async () => {
+          within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace' }).click()
+        })
+        expect(install.mock.calls.map(([req]) => req)).toEqual([
+          {
+            registryId: REG,
+            folderName: 'alpha',
+            targets: ['~/.claude/skills', '~/.agents/skills'],
+            mirrorRevision: 'deadbeef',
+            replaceTargets: ['~/.claude/skills'],
+          },
+          {
+            registryId: REG,
+            folderName: 'beta',
+            targets: ['~/.claude/skills', '~/.agents/skills'],
+            mirrorRevision: 'deadbeef',
+            replaceTargets: ['~/.claude/skills', '~/.agents/skills'],
+          },
+        ])
+      })
+    })
   })
 })
 
@@ -5405,5 +5502,173 @@ describe('Simultaneous syncs', () => {
     })
     expect(api.setSyncConcurrency).toHaveBeenCalledWith(2)
     expect(input).toHaveValue(2)
+  })
+})
+
+describe('Installation Collisions', () => {
+  const COLLIDED = skill({
+    id: 'alpha',
+    name: 'Alpha',
+    description: 'First skill',
+    perTarget: [
+      { target: '~/.claude/skills', state: 'external', occupant: { kind: 'symlink' } },
+      { target: '~/.config/goose/skills', state: 'external', occupant: { kind: 'folder' } },
+      {
+        target: '~/.agents/skills',
+        state: 'other-registry',
+        occupant: { kind: 'registry', registryLabel: 'Team skills' },
+      },
+    ],
+  })
+
+  async function openSkill(
+    subject: SkillSummary,
+    overrides: Partial<RendererApi> = {}
+  ): Promise<RendererApi> {
+    const api = fakeApi(syncStatus({ registries: [reg()] }), [subject], {
+      install: vi.fn().mockResolvedValue(installResult()),
+      detectTargets: vi
+        .fn()
+        .mockResolvedValue(detection([CLAUDE_CODE_TARGET, GOOSE_TARGET, CURSOR_SHARED_TARGET])),
+      ...overrides,
+    })
+    render(<App api={api} />)
+    fireEvent.click(await screen.findByText(subject.name))
+    await screen.findByRole('region', { name: 'On this Mac' })
+    return api
+  }
+
+  it('shows the installed count beside a collision, and an update over it', async () => {
+    const skills = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'a',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'installed' },
+          { target: '~/.agents/skills', state: 'external' },
+        ],
+      }),
+      skill({
+        id: 'beta',
+        name: 'Beta',
+        description: 'b',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'update-available' },
+          { target: '~/.agents/skills', state: 'external' },
+        ],
+      }),
+    ]
+    render(<App api={fakeApi(syncStatus(), skills)} />)
+    await screen.findByText('Alpha')
+    const [alpha, beta] = screen.getAllByRole('option')
+
+    expect(within(alpha).getByText('1')).toBeInTheDocument()
+    expect(within(alpha).getByText('External')).toBeInTheDocument()
+    expect(
+      within(alpha).getByText('Installed in Claude Code. External in Cursor')
+    ).toBeInTheDocument()
+    expect(within(alpha).getByRole('tooltip', { hidden: true })).toHaveTextContent(
+      'Claude Code · External: Cursor'
+    )
+    expect(within(beta).getByText('1')).toBeInTheDocument()
+    expect(within(beta).getByText('Update')).toBeInTheDocument()
+    expect(within(beta).queryByText('External')).not.toBeInTheDocument()
+  })
+
+  it('offers Replace only on collided targets, and Install to all never replaces', async () => {
+    const api = await openSkill(
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'external', occupant: { kind: 'symlink' } },
+          { target: '~/.config/goose/skills', state: 'not-installed' },
+          { target: '~/.agents/skills', state: 'installed' },
+        ],
+      })
+    )
+    const onThisMac = screen.getByRole('region', { name: 'On this Mac' })
+    expect(
+      within(onThisMac).getByRole('button', { name: 'Replace in Claude Code' })
+    ).toBeInTheDocument()
+    expect(
+      within(onThisMac).queryByRole('button', { name: /^Replace in (Goose|Cursor)$/ })
+    ).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Replace all' })).not.toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Install to all' }).click()
+    })
+    expect(api.install).toHaveBeenLastCalledWith({
+      registryId: REG,
+      folderName: 'alpha',
+      mirrorRevision: 'deadbeef',
+      targets: ['~/.config/goose/skills'],
+    })
+  })
+
+  it('confirms a Replace naming what happens to the target, and cancelling sends nothing', async () => {
+    const api = await openSkill(COLLIDED)
+    expect(screen.queryByRole('button', { name: 'Install to all' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace in Claude Code' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Replace skill?' })
+    expect(
+      within(within(dialog).getByRole('list', { name: 'Targets to replace' })).getByText(
+        'Claude Code: link removed'
+      )
+    ).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(api.install).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace in Claude Code' }))
+    await act(async () => {
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace' }).click()
+    })
+    expect(api.install).toHaveBeenCalledWith({
+      registryId: REG,
+      folderName: 'alpha',
+      mirrorRevision: 'deadbeef',
+      targets: ['~/.claude/skills'],
+      replaceTargets: ['~/.claude/skills'],
+    })
+  })
+
+  it('makes the main button Replace all once no target is empty, listing each outcome', async () => {
+    const api = await openSkill(COLLIDED)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Replace skill?' })
+    expect(
+      within(within(dialog).getByRole('list', { name: 'Targets to replace' }))
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual([
+      'Claude Code: link removed',
+      'Goose: moved to the Trash',
+      'Cursor: replaces the copy from Team skills',
+    ])
+    await act(async () => {
+      within(dialog).getByRole('button', { name: 'Replace' }).click()
+    })
+    const collided = ['~/.claude/skills', '~/.config/goose/skills', '~/.agents/skills']
+    expect(api.install).toHaveBeenCalledWith({
+      registryId: REG,
+      folderName: 'alpha',
+      mirrorRevision: 'deadbeef',
+      targets: collided,
+      replaceTargets: collided,
+    })
+  })
+
+  it.each([
+    ['removed from its registry', { softDeleted: true }],
+    ['from a removed registry', { orphaned: true }],
+  ])('offers no Replace for a skill %s', async (_case, overrides) => {
+    await openSkill({ ...COLLIDED, ...overrides })
+    expect(screen.queryByRole('button', { name: /^Replace/ })).not.toBeInTheDocument()
   })
 })
