@@ -5316,6 +5316,130 @@ describe('Catalogue multi-selection', () => {
       ).toBeInTheDocument()
     })
 
+    describe('with collided targets', () => {
+      const COLLIDED = [
+        skill({
+          id: 'alpha',
+          name: 'Alpha',
+          description: 'a',
+          perTarget: [
+            { target: '~/.claude/skills', state: 'external', occupant: { kind: 'symlink' } },
+            { target: '~/.agents/skills', state: 'not-installed' },
+          ],
+        }),
+        skill({
+          id: 'beta',
+          name: 'Beta',
+          description: 'b',
+          perTarget: [
+            { target: '~/.claude/skills', state: 'external', occupant: { kind: 'folder' } },
+            {
+              target: '~/.agents/skills',
+              state: 'other-registry',
+              occupant: { kind: 'registry', registryLabel: 'Team Skills' },
+            },
+          ],
+        }),
+      ]
+
+      async function selectBoth(install = vi.fn().mockResolvedValue({})) {
+        await renderList(COLLIDED, { install })
+        fireEvent.click(row('Alpha'))
+        fireEvent.click(row('Beta'), { shiftKey: true })
+        return install
+      }
+
+      it('skips collided targets and says how many while Replace existing skills is off', async () => {
+        const install = await selectBoth()
+        const checkbox = within(bar()).getByRole('checkbox', { name: 'Replace existing skills' })
+        expect(checkbox).not.toBeChecked()
+        expect(within(bar()).getByText('3 targets skipped for collisions')).toBeInTheDocument()
+        expect(within(bar()).getByRole('button', { name: 'Install (1)' })).toBeEnabled()
+
+        await act(async () => {
+          within(bar()).getByRole('button', { name: 'Install (1)' }).click()
+        })
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+        expect(install.mock.calls.map(([req]) => req)).toEqual([
+          {
+            registryId: REG,
+            folderName: 'alpha',
+            targets: ['~/.agents/skills'],
+            mirrorRevision: 'deadbeef',
+          },
+        ])
+      })
+
+      it('stops reporting skipped collisions once Replace existing skills is on', async () => {
+        await selectBoth()
+        fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Replace existing skills' }))
+        expect(within(bar()).queryByText(/skipped for collisions/)).not.toBeInTheDocument()
+        expect(within(bar()).getByRole('button', { name: 'Install (2)' })).toBeEnabled()
+      })
+
+      it('confirms what happens to each target before replacing, and sends nothing on cancel', async () => {
+        const install = await selectBoth()
+        fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Replace existing skills' }))
+        fireEvent.click(within(bar()).getByRole('button', { name: 'Install (2)' }))
+
+        const dialog = await screen.findByRole('alertdialog')
+        expect(
+          within(dialog)
+            .getAllByRole('listitem')
+            .map((item) => item.textContent)
+        ).toEqual([
+          'Alpha on Claude Code: link removed',
+          'Beta on Claude Code: moved to the Trash',
+          'Beta on Cursor: replaces the copy from Team Skills',
+        ])
+        expect(install).not.toHaveBeenCalled()
+
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+        expect(install).not.toHaveBeenCalled()
+      })
+
+      it('sends replaceTargets for each skill once the confirmation is accepted', async () => {
+        const install = await selectBoth()
+        fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Replace existing skills' }))
+        fireEvent.click(within(bar()).getByRole('button', { name: 'Install (2)' }))
+        const dialog = await screen.findByRole('alertdialog')
+        await act(async () => {
+          within(dialog).getByRole('button', { name: 'Replace' }).click()
+        })
+
+        expect(install.mock.calls.map(([req]) => req)).toEqual([
+          {
+            registryId: REG,
+            folderName: 'alpha',
+            targets: ['~/.claude/skills', '~/.agents/skills'],
+            replaceTargets: ['~/.claude/skills'],
+            mirrorRevision: 'deadbeef',
+          },
+          {
+            registryId: REG,
+            folderName: 'beta',
+            targets: ['~/.claude/skills', '~/.agents/skills'],
+            replaceTargets: ['~/.claude/skills', '~/.agents/skills'],
+            mirrorRevision: 'deadbeef',
+          },
+        ])
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+      })
+
+      it('asks for no confirmation when the checkbox is on but nothing would be replaced', async () => {
+        const install = vi.fn().mockResolvedValue({})
+        await renderList(INSTALLABLE, { install })
+        selectAlphaToGamma()
+        fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Replace existing skills' }))
+        await act(async () => {
+          within(bar()).getByRole('button', { name: 'Install (2)' }).click()
+        })
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+        expect(install).toHaveBeenCalledTimes(2)
+      })
+    })
+
     it('a reload that marks a selected skill installed lowers the count', async () => {
       let push: (() => void) | undefined
       let current = INSTALLABLE

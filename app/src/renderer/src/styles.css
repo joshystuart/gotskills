@@ -1894,3 +1894,8 @@ button:disabled {
   gap: 4px;
   font-size: 0.75rem;
 }
+
+.selection-collisions {
+  font-size: 0.75rem;
+  color: var(--muted);
+}

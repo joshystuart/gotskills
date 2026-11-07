@@ -113,6 +113,8 @@ export function App({ api }: AppProps): JSX.Element {
   const [installChips, setInstallChips] = useState<InstallTargetId[]>([])
   const [installPhase, setInstallPhase] = useState<BulkInstallPhase>({ kind: 'idle' })
   const [installAcknowledgeStale, setInstallAcknowledgeStale] = useState(false)
+  const [installReplaceExisting, setInstallReplaceExisting] = useState(false)
+  const [pendingBulkReplacement, setPendingBulkReplacement] = useState(false)
   const searchRef = useRef<HTMLInputElement | null>(null)
   /**
    * Kept live so a bulk run always dispatches against the current sync
@@ -253,7 +255,10 @@ export function App({ api }: AppProps): JSX.Element {
   }, [])
 
   const confirmOpen =
-    pendingRemoval !== null || pendingReplacement !== null || pendingRegistryRemoval !== null
+    pendingRemoval !== null ||
+    pendingReplacement !== null ||
+    pendingBulkReplacement ||
+    pendingRegistryRemoval !== null
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -533,6 +538,7 @@ export function App({ api }: AppProps): JSX.Element {
     if (selection.ids.size === 0 && next.ids.size > 0) {
       setInstallChips(visibleTargetIds)
       setInstallAcknowledgeStale(false)
+      setInstallReplaceExisting(false)
     }
     setSelection(next)
     setSelectedId(skillId)
@@ -542,7 +548,12 @@ export function App({ api }: AppProps): JSX.Element {
   const installWork = deriveInstallWork(
     skills.filter((s) => selection.ids.has(s.id)),
     visibleTargetIds.filter((id) => installChips.includes(id)),
-    { acknowledgeStale: installAcknowledgeStale, isInstalledOnly, status }
+    {
+      acknowledgeStale: installAcknowledgeStale,
+      isInstalledOnly,
+      replaceExisting: installReplaceExisting,
+      status,
+    }
   )
 
   function toggleInstallChip(target: InstallTargetId): void {
@@ -551,7 +562,16 @@ export function App({ api }: AppProps): JSX.Element {
     )
   }
 
+  function onInstallSelection(): void {
+    if (installWork.items.some((item) => item.replaceTargets.length > 0)) {
+      setPendingBulkReplacement(true)
+    } else {
+      void onRunInstallSelection()
+    }
+  }
+
   async function onRunInstallSelection(): Promise<void> {
+    setPendingBulkReplacement(false)
     const work = installWork
     if (runInFlight || work.items.length === 0) return
     runInFlightRef.current = true
@@ -577,6 +597,7 @@ export function App({ api }: AppProps): JSX.Element {
   function dismissInstallSummary(): void {
     setInstallPhase({ kind: 'idle' })
     setInstallAcknowledgeStale(false)
+    setInstallReplaceExisting(false)
   }
 
   const updateAllWork = deriveUpdateWork(skills, status)
@@ -875,9 +896,11 @@ export function App({ api }: AppProps): JSX.Element {
                 busy={busy}
                 acknowledgeStale={installAcknowledgeStale}
                 onAcknowledgeStale={setInstallAcknowledgeStale}
+                replaceExisting={installReplaceExisting}
+                onReplaceExisting={setInstallReplaceExisting}
                 onToggleTarget={toggleInstallChip}
                 onClear={() => setSelection(EMPTY_SELECTION)}
-                onInstall={() => void onRunInstallSelection()}
+                onInstall={onInstallSelection}
                 onCancel={cancelUpdateAll}
                 onDismiss={dismissInstallSummary}
               />
@@ -994,6 +1017,35 @@ export function App({ api }: AppProps): JSX.Element {
                 </li>
               )
             })}
+          </ul>
+        </ConfirmDialog>
+      ) : null}
+
+      {pendingBulkReplacement ? (
+        <ConfirmDialog
+          title="Replace skills?"
+          confirmLabel="Replace"
+          confirmDisabled={busy}
+          onConfirm={() => void onRunInstallSelection()}
+          onCancel={() => setPendingBulkReplacement(false)}
+        >
+          Replace these existing skills?
+          <ul className="modal-list">
+            {installWork.items.flatMap((item) =>
+              item.replaceTargets.map((target) => {
+                const outcome = replacementOutcome(
+                  skills
+                    .find((s) => s.id === item.skillId)
+                    ?.perTarget.find((entry) => entry.target === target)?.occupant
+                )
+                return (
+                  <li key={`${item.skillId}:${target}`}>
+                    {item.name} on {targetLabel(targets, target)}
+                    {outcome ? `: ${outcome}` : null}
+                  </li>
+                )
+              })
+            )}
           </ul>
         </ConfirmDialog>
       ) : null}

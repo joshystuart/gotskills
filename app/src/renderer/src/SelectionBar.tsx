@@ -27,6 +27,8 @@ interface SelectionBarProps {
   busy: boolean
   acknowledgeStale: boolean
   onAcknowledgeStale: (on: boolean) => void
+  replaceExisting: boolean
+  onReplaceExisting: (on: boolean) => void
   onToggleTarget: (target: InstallTargetId) => void
   onClear: () => void
   onInstall: () => void
@@ -93,6 +95,8 @@ function IdleBar({
   busy,
   acknowledgeStale,
   onAcknowledgeStale,
+  replaceExisting,
+  onReplaceExisting,
   onToggleTarget,
   onClear,
   onInstall,
@@ -116,6 +120,21 @@ function IdleBar({
             </label>
           ))}
         </div>
+        <label className="selection-chip">
+          <input
+            type="checkbox"
+            checked={replaceExisting}
+            onChange={(event) => onReplaceExisting(event.target.checked)}
+          />
+          Replace existing skills
+        </label>
+        {work.skippedCollisions > 0 ? (
+          <span className="selection-collisions">
+            {work.skippedCollisions === 1
+              ? '1 target skipped for collisions'
+              : `${work.skippedCollisions} targets skipped for collisions`}
+          </span>
+        ) : null}
         <StaleDisclosures
           disclosures={work.disclosures}
           acknowledgeStale={acknowledgeStale}

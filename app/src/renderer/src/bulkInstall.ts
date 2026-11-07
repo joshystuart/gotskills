@@ -2,6 +2,7 @@ import type {
   InstallRequest,
   InstallResult,
   InstallTargetId,
+  ReconcileState,
   SkillSummary,
   SyncStatus,
 } from '../../shared/ipc'
@@ -19,6 +20,8 @@ export interface InstallItem {
   skillId: string
   name: string
   targets: InstallTargetId[]
+  /** The subset of `targets` that holds an Installation Collision and is replaced. */
+  replaceTargets: InstallTargetId[]
   /** True when the Skill comes from a stale Registry Snapshot. */
   staleGated: boolean
 }
@@ -33,19 +36,27 @@ export interface InstallWork {
   heldBack: InstallItem[]
   /** One per stale Registry among the installable Skills, acknowledged or not. */
   disclosures: StaleRegistryDisclosure[]
+  /** Chosen targets left out because they hold an Installation Collision and replace is off. */
+  skippedCollisions: number
 }
 
 export interface InstallWorkOptions {
   acknowledgeStale: boolean
   /** True for an entry whose Registry is disabled or removed. */
   isInstalledOnly: (skill: SkillSummary) => boolean
+  /** True to include targets holding an Installation Collision, marked for replacement. */
+  replaceExisting?: boolean
   status?: SyncStatus | null
 }
+
+const COLLIDED_STATES: ReconcileState[] = ['external', 'other-registry']
 
 /**
  * Decides, for each selected Skill, whether it installs and into which of the
  * chosen targets. It never updates or repairs: a target that holds the Skill
- * in any state other than `not-installed` is left alone.
+ * in any state other than `not-installed` is left alone, except that a
+ * collided target is replaced when `replaceExisting` is on and skipped (and
+ * counted) when it is off.
  */
 export function deriveInstallWork(
   skills: SkillSummary[],
@@ -54,9 +65,19 @@ export function deriveInstallWork(
 ): InstallWork {
   const installable: InstallItem[] = []
   let skipped = 0
+  let skippedCollisions = 0
   for (const skill of skills) {
-    const targets = chosenTargets.filter((t) => targetState(skill, t) === 'not-installed')
-    if (skill.softDeleted || options.isInstalledOnly(skill) || targets.length === 0) {
+    const collided = chosenTargets.filter((t) => COLLIDED_STATES.includes(targetState(skill, t)))
+    const replaceTargets = options.replaceExisting ? collided : []
+    const targets = chosenTargets.filter(
+      (t) => targetState(skill, t) === 'not-installed' || replaceTargets.includes(t)
+    )
+    if (skill.softDeleted || options.isInstalledOnly(skill)) {
+      skipped++
+      continue
+    }
+    if (!options.replaceExisting) skippedCollisions += collided.length
+    if (targets.length === 0) {
       skipped++
       continue
     }
@@ -66,6 +87,7 @@ export function deriveInstallWork(
       skillId: skill.id,
       name: skill.name,
       targets,
+      replaceTargets,
       staleGated: skill.stale,
     })
   }
@@ -75,6 +97,7 @@ export function deriveInstallWork(
     skipped,
     heldBack: options.acknowledgeStale ? [] : stale,
     disclosures: staleDisclosures(stale, skills, options.status ?? null),
+    skippedCollisions,
   }
 }
 
@@ -146,6 +169,7 @@ export async function runBulkInstall(options: RunBulkInstallOptions): Promise<Bu
       mirrorRevision: revision,
     }
     if (item.staleGated) request.acknowledgeStale = true
+    if (item.replaceTargets.length > 0) request.replaceTargets = item.replaceTargets
 
     try {
       await api.install(request)
