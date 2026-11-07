@@ -183,7 +183,8 @@ jobs:
           mkdir -p "$(dirname "$UNIVERSAL")"
           lipo -create "$ARM" "$INTEL" -output "$UNIVERSAL"
           chmod +x "$UNIVERSAL"
-          lipo "$UNIVERSAL" -verify_arch arm64 x86_64
+          lipo "$UNIVERSAL" -verify_arch arm64
+          lipo "$UNIVERSAL" -verify_arch x86_64
 
       - name: Import Apple signing certificate
         if: inputs.dry_run != true
@@ -257,7 +258,9 @@ jobs:
         working-directory: app
         run: |
           BUNDLE=src-tauri/target/universal-apple-darwin/release/bundle
-          lipo "$BUNDLE/macos/Got Skills.app/Contents/MacOS/got-skills" -verify_arch arm64 x86_64
+          BINARY="$BUNDLE/macos/Got Skills.app/Contents/MacOS/got-skills"
+          lipo "$BINARY" -verify_arch arm64
+          lipo "$BINARY" -verify_arch x86_64
           scripts/check-app-size.sh "$BUNDLE/macos/Got Skills.app"
 
       - name: Verify release signing and notarization
