@@ -278,6 +278,9 @@ pub struct InstallRequest {
     pub mirror_revision: String,
     #[serde(default)]
     pub acknowledge_stale: Option<bool>,
+    /// Collided targets the user chose to install over; a subset of `targets`.
+    #[serde(default)]
+    pub replace_targets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -631,6 +634,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(request.acknowledge_stale, None);
+        assert!(request.replace_targets.is_empty());
         let update: UpdateRegistryRequest =
             serde_json::from_value(json!({ "id": "r", "autoUpdate": true })).unwrap();
         assert_eq!(update.auto_update, Some(true));

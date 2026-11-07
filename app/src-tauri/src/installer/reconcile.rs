@@ -281,12 +281,17 @@ mod tests {
 
     impl Fixture {
         fn install(&self, targets: &[&str]) {
+            self.install_over(targets, &[]);
+        }
+
+        fn install_over(&self, targets: &[&str], replace: &[&str]) {
             let deps = InstallDeps {
                 conn: &self.conn,
                 registry_id: REGISTRY,
                 mirror_path: self.mirror.path(),
                 environment: &self.env,
                 current_revision: "rev",
+                trash: &no_trash,
             };
             let request = InstallRequest {
                 registry_id: REGISTRY.into(),
@@ -294,6 +299,7 @@ mod tests {
                 targets: targets.iter().map(|t| t.to_string()).collect(),
                 mirror_revision: "rev".into(),
                 acknowledge_stale: None,
+                replace_targets: replace.iter().map(|t| t.to_string()).collect(),
             };
             install_skill(&deps, &request).unwrap();
         }
@@ -426,6 +432,19 @@ mod tests {
         add_registry(&f.conn, "reg-b", true, false);
         upsert_install_record(&f.conn, &record(CLAUDE, "alpha", "reg-b")).unwrap();
         assert_eq!(f.state(CLAUDE), ReconcileState::OtherRegistry);
+    }
+
+    #[test]
+    fn replacing_another_registrys_install_makes_it_installed_from_this_one() {
+        let f = fixture(&["claude-code"]);
+        add_registry(&f.conn, "reg-b", true, false);
+        upsert_install_record(&f.conn, &record(CLAUDE, "alpha", "reg-b")).unwrap();
+        fs::create_dir_all(f.skill_dir(".claude/skills")).unwrap();
+        fs::write(f.skill_dir(".claude/skills").join("SKILL.md"), "reg-b").unwrap();
+
+        f.install_over(&[CLAUDE], &[CLAUDE]);
+
+        assert_eq!(f.state(CLAUDE), ReconcileState::Installed);
     }
 
     #[cfg(unix)]
