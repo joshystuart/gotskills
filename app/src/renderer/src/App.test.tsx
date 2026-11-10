@@ -3393,6 +3393,32 @@ describe('Replacing an Installation Collision', () => {
 
     expect(mainActions()).toEqual(['Replace all', 'Remove'])
   })
+
+  it('says what happens to what is already in each target before replacing', async () => {
+    renderCollided([
+      { target: '~/.claude/skills', state: 'external', occupant: { kind: 'symlink' } },
+      {
+        target: '~/.config/goose/skills',
+        state: 'other-registry',
+        occupant: { kind: 'registry', registryLabel: 'Team Skills' },
+      },
+      { target: '~/.agents/skills', state: 'installed', installedVersion: 'deadbee' },
+      { target: '~/.zencoder/skills', state: 'external', occupant: { kind: 'folder' } },
+    ])
+    fireEvent.click(await screen.findByText('Alpha'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Replace skill?' })
+    expect(
+      within(dialog)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual([
+      'Claude Code — link removed',
+      'Goose — replaces the copy from Team Skills',
+      'Zencoder — moved to the Trash',
+    ])
+  })
 })
 
 describe('Update all', () => {

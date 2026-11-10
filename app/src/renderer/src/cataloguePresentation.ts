@@ -251,6 +251,21 @@ export function targetState(skill: SkillSummary, target: InstallTargetId): Recon
   return skill.perTarget.find((p) => p.target === target)?.state ?? 'not-installed'
 }
 
+/** What replacing a collided target does to what's already there, if known. */
+export function replaceOutcome(skill: SkillSummary, target: InstallTargetId): string | null {
+  const occupant = skill.perTarget.find((p) => p.target === target)?.occupant
+  switch (occupant?.kind) {
+    case 'symlink':
+      return 'link removed'
+    case 'folder':
+      return 'moved to the Trash'
+    case 'registry':
+      return `replaces the copy from ${occupant.registryLabel}`
+    default:
+      return null
+  }
+}
+
 export function targetStateLabel(skill: SkillSummary, target: InstallTargetId): StateLabel {
   return STATE_LABELS[targetState(skill, target)]
 }

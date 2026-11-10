@@ -36,6 +36,7 @@ import {
   isInstalledLike,
   registryDotColour,
   registryRecordLabel,
+  replaceOutcome,
   searchSkills,
   skillsInView,
   targetLabel,
@@ -982,9 +983,15 @@ export function App({ api }: AppProps): JSX.Element {
         >
           <p>Install “{selected.name}” over what’s already there in:</p>
           <ul className="modal-list" aria-label="Targets to replace">
-            {pendingReplace.map((target) => (
-              <li key={target}>{targetLabel(targets, target)}</li>
-            ))}
+            {pendingReplace.map((target) => {
+              const outcome = replaceOutcome(selected, target)
+              return (
+                <li key={target}>
+                  {targetLabel(targets, target)}
+                  {outcome ? ` — ${outcome}` : null}
+                </li>
+              )
+            })}
           </ul>
         </ConfirmDialog>
       ) : null}

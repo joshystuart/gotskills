@@ -176,6 +176,7 @@ fn per_target_from_reconcile(
         .map(|entry| PerTargetState {
             target: entry.target.clone(),
             state: entry.state,
+            occupant: entry.occupant.clone(),
             installed_version: short_sha(
                 records
                     .get(entry.target.as_str())
@@ -358,7 +359,7 @@ mod tests {
         insert_registry, soft_remove_registry, update_registry, upsert_marker_success,
         InsertRegistryInput, UpdateRegistryFields,
     };
-    use crate::types::{InstallMethod, ReconcileState, RegistrySource};
+    use crate::types::{CollisionOccupant, InstallMethod, ReconcileState, RegistrySource};
 
     fn ok(id: &str, at: &str, revision: &str) -> RegistrySyncStatus {
         RegistrySyncStatus {
@@ -513,6 +514,7 @@ mod tests {
                 mirror_hash: None,
                 disk: vec![],
                 lock_agrees: true,
+                occupant: None,
             }],
         }
     }
@@ -680,6 +682,31 @@ mod tests {
                 target: "claude-code".into(),
                 state: ReconcileState::UpdateAvailable,
                 installed_version: Some("1234567".into()),
+                occupant: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn per_target_states_carry_what_occupies_a_collided_target() {
+        let conn = open_in_memory().unwrap();
+        let a = registry(&conn, "a");
+        skill(&conn, &a, "alpha", 0);
+        let mut reconcile = report(&a, "alpha", "claude-code", ReconcileState::OtherRegistry);
+        reconcile.entries[0].occupant = Some(CollisionOccupant::Registry {
+            registry_label: "Team Skills".into(),
+        });
+
+        let snapshot = read_catalogue(&conn, &reconcile, &[], Path::new("/home")).unwrap();
+        assert_eq!(
+            snapshot.skills[0].per_target,
+            vec![PerTargetState {
+                target: "claude-code".into(),
+                state: ReconcileState::OtherRegistry,
+                installed_version: None,
+                occupant: Some(CollisionOccupant::Registry {
+                    registry_label: "Team Skills".into(),
+                }),
             }]
         );
     }
