@@ -279,38 +279,31 @@ export interface AttentionLabel {
   collision: boolean
 }
 
-const ATTENTION_LABELS: [ReconcileState, AttentionLabel][] = [
+const COLLIDED_STATES: ReconcileState[] = ['external', 'other-registry']
+
+/** True when a target holds an Installation Collision: a copy Got Skills didn't install. */
+export function isCollided(state: ReconcileState): boolean {
+  return COLLIDED_STATES.includes(state)
+}
+
+const ATTENTION_LABELS: [ReconcileState, AttentionLabel][] = (
   [
-    'needs-repair',
-    { tone: 'bad', glyph: '!', text: 'Needs repair', cellText: 'Repair', collision: false },
-  ],
-  [
-    'removed-from-registry',
-    { tone: 'bad', glyph: '×', text: 'Removed', cellText: 'Removed', collision: false },
-  ],
-  [
-    'orphaned',
-    { tone: 'quiet', glyph: '⊘', text: 'Orphaned', cellText: 'Orphaned', collision: false },
-  ],
-  [
-    'update-available',
-    { tone: 'warn', glyph: '↑', text: 'Update ready', cellText: 'Update', collision: false },
-  ],
-  [
-    'external',
-    { tone: 'quiet', glyph: '·', text: 'External', cellText: 'External', collision: true },
-  ],
-  [
-    'other-registry',
-    {
-      tone: 'quiet',
-      glyph: '·',
-      text: 'Held by another registry',
-      cellText: 'Other registry',
-      collision: true,
-    },
-  ],
-]
+    ['needs-repair', { tone: 'bad', glyph: '!', text: 'Needs repair', cellText: 'Repair' }],
+    ['removed-from-registry', { tone: 'bad', glyph: '×', text: 'Removed', cellText: 'Removed' }],
+    ['orphaned', { tone: 'quiet', glyph: '⊘', text: 'Orphaned', cellText: 'Orphaned' }],
+    ['update-available', { tone: 'warn', glyph: '↑', text: 'Update ready', cellText: 'Update' }],
+    ['external', { tone: 'quiet', glyph: '·', text: 'External', cellText: 'External' }],
+    [
+      'other-registry',
+      {
+        tone: 'quiet',
+        glyph: '·',
+        text: 'Held by another registry',
+        cellText: 'Other registry',
+      },
+    ],
+  ] satisfies [ReconcileState, Omit<AttentionLabel, 'collision'>][]
+).map(([state, label]) => [state, { ...label, collision: isCollided(state) }])
 
 export interface RowAttention {
   label: AttentionLabel

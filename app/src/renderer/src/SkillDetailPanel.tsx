@@ -8,6 +8,7 @@ import type {
 import { shortSha } from '../../shared/shortSha'
 import {
   formatUpdatedAt,
+  isCollided,
   staleSkillNotice,
   targetLabel,
   targetState,
@@ -23,8 +24,6 @@ interface InstallActions {
   onUpdate: (targets: InstallTargetId[]) => void
   onReplace: (targets: InstallTargetId[]) => void
 }
-
-const COLLIDED_STATES: readonly string[] = ['external', 'other-registry']
 
 interface RepairRemove {
   repairTargets: InstallTargetId[]
@@ -66,9 +65,7 @@ export function SkillDetailPanel({
 }: SkillDetailPanelProps): JSX.Element {
   const targetIds = targets.map((target) => target.id)
   const lacking = targetIds.filter((target) => targetState(skill, target) === 'not-installed')
-  const collided = targetIds.filter((target) =>
-    COLLIDED_STATES.includes(targetState(skill, target))
-  )
+  const collided = targetIds.filter((target) => isCollided(targetState(skill, target)))
   const mainAction =
     lacking.length > 0
       ? {
@@ -102,7 +99,7 @@ export function SkillDetailPanel({
       {
         text: 'Replace',
         label: `Replace in ${target.label}`,
-        shown: installActions.visible && COLLIDED_STATES.includes(state),
+        shown: installActions.visible && isCollided(state),
         disabled: installActions.disabled,
         run: installActions.onReplace,
       },
