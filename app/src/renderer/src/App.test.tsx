@@ -5371,6 +5371,112 @@ describe('Catalogue multi-selection', () => {
       expect(await within(bar()).findByRole('button', { name: 'Install (1)' })).toBeInTheDocument()
       expect(selectionCount()).toHaveTextContent('3 selected · 2 skipped')
     })
+
+    describe('replacing Installation Collisions', () => {
+      const COLLIDED = [
+        skill({
+          id: 'alpha',
+          name: 'Alpha',
+          description: 'a',
+          perTarget: [
+            { target: '~/.claude/skills', state: 'external', occupant: { kind: 'symlink' } },
+            { target: '~/.agents/skills', state: 'not-installed' },
+          ],
+        }),
+        skill({
+          id: 'beta',
+          name: 'Beta',
+          description: 'b',
+          perTarget: [
+            {
+              target: '~/.claude/skills',
+              state: 'other-registry',
+              occupant: { kind: 'registry', registryLabel: 'acme/skills' },
+            },
+            { target: '~/.agents/skills', state: 'external', occupant: { kind: 'folder' } },
+          ],
+        }),
+      ]
+
+      function replaceCheckbox(): HTMLElement {
+        return within(bar()).getByRole('checkbox', { name: 'Replace existing skills' })
+      }
+
+      it('skips collided targets and says how many until Replace existing skills is on', async () => {
+        await renderList(COLLIDED)
+        fireEvent.click(row('Alpha'))
+        fireEvent.click(row('Beta'), { shiftKey: true })
+
+        expect(replaceCheckbox()).not.toBeChecked()
+        expect(selectionCount()).toHaveTextContent(
+          '2 selected · 1 skipped · 3 collided targets skipped'
+        )
+        expect(within(bar()).getByRole('button', { name: 'Install (1)' })).toBeEnabled()
+
+        fireEvent.click(replaceCheckbox())
+        expect(selectionCount()).toHaveTextContent(/^2 selected · 0 skipped$/)
+        expect(within(bar()).getByRole('button', { name: 'Install (2)' })).toBeEnabled()
+      })
+
+      it('confirms every skill and target it will replace, then sends replaceTargets per skill', async () => {
+        const install = vi.fn().mockResolvedValue({})
+        await renderList(COLLIDED, { install })
+        fireEvent.click(row('Alpha'))
+        fireEvent.click(row('Beta'), { shiftKey: true })
+        fireEvent.click(replaceCheckbox())
+        fireEvent.click(within(bar()).getByRole('button', { name: 'Install (2)' }))
+
+        const dialog = screen.getByRole('alertdialog', { name: 'Replace skills?' })
+        expect(
+          within(dialog)
+            .getAllByRole('listitem')
+            .map((item) => item.textContent)
+        ).toEqual([
+          'Alpha in Claude Code — link removed',
+          'Beta in Claude Code — replaces the copy from acme/skills',
+          'Beta in Cursor — moved to the Trash',
+        ])
+        expect(install).not.toHaveBeenCalled()
+
+        await act(async () => {
+          within(dialog).getByRole('button', { name: 'Replace' }).click()
+        })
+        expect(install.mock.calls.map(([req]) => req)).toEqual([
+          {
+            registryId: REG,
+            folderName: 'alpha',
+            targets: ['~/.claude/skills', '~/.agents/skills'],
+            replaceTargets: ['~/.claude/skills'],
+            mirrorRevision: 'deadbeef',
+          },
+          {
+            registryId: REG,
+            folderName: 'beta',
+            targets: ['~/.claude/skills', '~/.agents/skills'],
+            replaceTargets: ['~/.claude/skills', '~/.agents/skills'],
+            mirrorRevision: 'deadbeef',
+          },
+        ])
+      })
+
+      it('runs nothing when the replace confirmation is cancelled', async () => {
+        const install = vi.fn().mockResolvedValue({})
+        await renderList(COLLIDED, { install })
+        fireEvent.click(row('Alpha'))
+        fireEvent.click(row('Beta'), { shiftKey: true })
+        fireEvent.click(replaceCheckbox())
+        fireEvent.click(within(bar()).getByRole('button', { name: 'Install (2)' }))
+
+        fireEvent.click(
+          within(screen.getByRole('alertdialog', { name: 'Replace skills?' })).getByRole('button', {
+            name: 'Cancel',
+          })
+        )
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+        expect(install).not.toHaveBeenCalled()
+        expect(selectionCount()).toHaveTextContent('2 selected')
+      })
+    })
   })
 })
 

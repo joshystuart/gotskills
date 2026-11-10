@@ -109,6 +109,59 @@ describe('deriveInstallWork', () => {
     expect(acked.items.map((i) => i.folderName)).toEqual(['s', 'f'])
     expect(acked.heldBack).toEqual([])
   })
+
+  const GOOSE = '~/.config/goose/skills'
+  const collided = [
+    skill('a', [
+      { target: CLAUDE, state: 'external', occupant: { kind: 'symlink' } },
+      { target: SHARED, state: 'not-installed' },
+    ]),
+    skill('b', [
+      {
+        target: CLAUDE,
+        state: 'other-registry',
+        occupant: { kind: 'registry', registryLabel: 'x' },
+      },
+      { target: SHARED, state: 'external', occupant: { kind: 'folder' } },
+    ]),
+    skill('c', notInstalled(CLAUDE, SHARED)),
+  ]
+
+  it('with replace off, leaves out collided targets and counts them as skipped collisions', () => {
+    const work = deriveInstallWork(collided, [CLAUDE, SHARED], {
+      acknowledgeStale: false,
+      replace: false,
+      isInstalledOnly: noneInstalledOnly,
+    })
+    expect(work.items.map((i) => [i.folderName, i.targets, i.replaceTargets])).toEqual([
+      ['a', [SHARED], []],
+      ['c', [CLAUDE, SHARED], []],
+    ])
+    expect(work.skipped).toBe(1)
+    expect(work.skippedCollisions).toBe(3)
+
+    const unchosen = deriveInstallWork(collided, [SHARED, GOOSE], {
+      acknowledgeStale: false,
+      replace: false,
+      isInstalledOnly: noneInstalledOnly,
+    })
+    expect(unchosen.skippedCollisions).toBe(1)
+  })
+
+  it('with replace on, includes collided targets and marks them for replacement', () => {
+    const work = deriveInstallWork(collided, [CLAUDE, SHARED], {
+      acknowledgeStale: false,
+      replace: true,
+      isInstalledOnly: noneInstalledOnly,
+    })
+    expect(work.items.map((i) => [i.folderName, i.targets, i.replaceTargets])).toEqual([
+      ['a', [CLAUDE, SHARED], [CLAUDE]],
+      ['b', [CLAUDE, SHARED], [CLAUDE, SHARED]],
+      ['c', [CLAUDE, SHARED], []],
+    ])
+    expect(work.skipped).toBe(0)
+    expect(work.skippedCollisions).toBe(0)
+  })
 })
 
 describe('runBulkInstall', () => {
@@ -158,6 +211,32 @@ describe('runBulkInstall', () => {
     expect(result.installed).toBe(2)
     expect(result.failures.map((f) => [f.item.name, f.reason])).toEqual([['B', 'collision']])
     expect(result.cancelled).toBe(false)
+  })
+
+  it('sends the collided targets as replaceTargets only for skills that replace', async () => {
+    const replacing = deriveInstallWork(
+      [
+        skill('a', [
+          { target: CLAUDE, state: 'external', occupant: { kind: 'symlink' } },
+          { target: SHARED, state: 'not-installed' },
+        ]),
+        skill('c', notInstalled(CLAUDE, SHARED)),
+      ],
+      [CLAUDE, SHARED],
+      { acknowledgeStale: false, replace: true, isInstalledOnly: noneInstalledOnly }
+    )
+    const install = vi.fn((_req: InstallRequest) => Promise.resolve(installResult()))
+    await runBulkInstall({ api: { install }, work: replacing, getRevision: () => 'rev1' })
+    expect(install.mock.calls.map(([req]) => req)).toEqual([
+      {
+        registryId: 'r1',
+        folderName: 'a',
+        targets: [CLAUDE, SHARED],
+        replaceTargets: [CLAUDE],
+        mirrorRevision: 'rev1',
+      },
+      { registryId: 'r1', folderName: 'c', targets: [CLAUDE, SHARED], mirrorRevision: 'rev1' },
+    ])
   })
 
   it('stops after the current skill on cancel', async () => {

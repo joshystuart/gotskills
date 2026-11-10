@@ -509,7 +509,8 @@ button:disabled {
   color: var(--muted);
 }
 
-.update-all-stale-ack {
+.update-all-stale-ack,
+.selection-replace {
   display: flex;
   align-items: center;
   gap: 6px;
