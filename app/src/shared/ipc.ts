@@ -197,6 +197,8 @@ export interface InstallRequest {
   mirrorRevision: string
   /** Required to install/update from a stale Registry Snapshot. */
   acknowledgeStale?: boolean
+  /** Collided targets the user confirmed replacing; a subset of `targets`. */
+  replaceTargets?: InstallTargetId[]
 }
 
 export interface TargetResult {

@@ -45,7 +45,8 @@ pub fn copy_tree(src: &Path, dest: &Path, filter: bool) -> io::Result<()> {
     Ok(())
 }
 
-fn remove_path(path: &Path) -> io::Result<()> {
+/// Remove a file, a symlink (not what it points to) or a folder and its contents.
+pub fn remove_path(path: &Path) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path),
         Ok(_) => fs::remove_file(path),

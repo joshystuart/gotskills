@@ -98,6 +98,7 @@ export function App({ api }: AppProps): JSX.Element {
   const [lastInstall, setLastInstall] = useState<InstallResult | null>(null)
   const [acknowledgedStale, setAcknowledgedStale] = useState(false)
   const [pendingRemoval, setPendingRemoval] = useState<InstallTargetId[] | null>(null)
+  const [pendingReplace, setPendingReplace] = useState<InstallTargetId[] | null>(null)
   const [pendingRegistryRemoval, setPendingRegistryRemoval] = useState<RegistryRecord | null>(null)
   const [highlightedRegistryId, setHighlightedRegistryId] = useState<string | null>(null)
   const [fileViewerOpen, setFileViewerOpen] = useState(false)
@@ -250,7 +251,8 @@ export function App({ api }: AppProps): JSX.Element {
     setSettingsOpen(true)
   }, [])
 
-  const confirmOpen = pendingRemoval !== null || pendingRegistryRemoval !== null
+  const confirmOpen =
+    pendingRemoval !== null || pendingReplace !== null || pendingRegistryRemoval !== null
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -629,7 +631,8 @@ export function App({ api }: AppProps): JSX.Element {
   function buildInstallRequest(
     skill: SkillSummary,
     installTargets: InstallTargetId[],
-    revision: string
+    revision: string,
+    replaceTargets?: InstallTargetId[]
   ): InstallRequest {
     const req: InstallRequest = {
       registryId: skill.registryId,
@@ -638,10 +641,19 @@ export function App({ api }: AppProps): JSX.Element {
       mirrorRevision: revision,
     }
     if (skill.stale && acknowledgedStale) req.acknowledgeStale = true
+    if (replaceTargets) req.replaceTargets = replaceTargets
     return req
   }
 
-  async function runInstall(installTargets: InstallTargetId[]): Promise<void> {
+  async function runReplace(replaceTargets: InstallTargetId[]): Promise<void> {
+    setPendingReplace(null)
+    await runInstall(replaceTargets, replaceTargets)
+  }
+
+  async function runInstall(
+    installTargets: InstallTargetId[],
+    replaceTargets?: InstallTargetId[]
+  ): Promise<void> {
     if (!selected || installTargets.length === 0) return
     const revision = revisionFor(selected)
     if (!revision) {
@@ -651,7 +663,9 @@ export function App({ api }: AppProps): JSX.Element {
     setInstalling(true)
     setInstallError(null)
     try {
-      const result = await api.install(buildInstallRequest(selected, installTargets, revision))
+      const result = await api.install(
+        buildInstallRequest(selected, installTargets, revision, replaceTargets)
+      )
       setLastInstall(result)
       await loadCatalogue()
     } catch (err) {
@@ -913,6 +927,7 @@ export function App({ api }: AppProps): JSX.Element {
                     updateTargets,
                     onInstall: runInstall,
                     onUpdate: runRepair,
+                    onReplace: setPendingReplace,
                   }}
                   repairRemove={{
                     repairTargets,
@@ -954,6 +969,23 @@ export function App({ api }: AppProps): JSX.Element {
           {pendingRemoval.length === 1
             ? `Remove “${selected.name}” from ${targetLabel(targets, pendingRemoval[0])}?`
             : `Remove “${selected.name}” from installed apps on this Mac?`}
+        </ConfirmDialog>
+      ) : null}
+
+      {pendingReplace && selected ? (
+        <ConfirmDialog
+          title="Replace skill?"
+          confirmLabel="Replace"
+          confirmDisabled={busy}
+          onConfirm={() => void runReplace(pendingReplace)}
+          onCancel={() => setPendingReplace(null)}
+        >
+          <p>Install “{selected.name}” over what’s already there in:</p>
+          <ul className="modal-list" aria-label="Targets to replace">
+            {pendingReplace.map((target) => (
+              <li key={target}>{targetLabel(targets, target)}</li>
+            ))}
+          </ul>
         </ConfirmDialog>
       ) : null}
 

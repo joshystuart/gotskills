@@ -3204,6 +3204,197 @@ function deferred<T>(): {
   return { promise, resolve, reject }
 }
 
+describe('Replacing an Installation Collision', () => {
+  const ZENCODER_TARGET: InstallTargetStatus = {
+    id: '~/.zencoder/skills',
+    label: 'Zencoder',
+    shared: false,
+    visible: true,
+    agents: [],
+  }
+
+  function installed(targets: string[]): InstallResult {
+    return {
+      registryId: REG,
+      folderName: 'alpha',
+      skillId: `${REG}/alpha`,
+      mirrorRevision: 'deadbeef',
+      contentHash: 'hash',
+      provenanceSha: 'deadbeef',
+      cliVersion: '1.7.0',
+      perTarget: targets.map((target) => ({
+        target,
+        outcome: 'installed',
+        method: 'copy',
+        paths: [],
+      })),
+      installedAt: new Date().toISOString(),
+    }
+  }
+
+  function renderCollided(
+    perTarget: SkillSummary['perTarget'],
+    overrides: Partial<SkillSummary> = {}
+  ): RendererApi {
+    const api = fakeApi(
+      syncStatus({ registries: [reg()] }),
+      [skill({ id: 'alpha', name: 'Alpha', description: 'First skill', perTarget, ...overrides })],
+      {
+        install: vi.fn().mockResolvedValue(installed([])),
+        detectTargets: vi
+          .fn()
+          .mockResolvedValue(
+            detection([CLAUDE_CODE_TARGET, GOOSE_TARGET, CURSOR_SHARED_TARGET, ZENCODER_TARGET])
+          ),
+      }
+    )
+    render(<App api={api} />)
+    return api
+  }
+
+  function mainActions(): (string | null)[] {
+    const actions = document.querySelector('.detail-actions') as HTMLElement
+    return within(actions)
+      .getAllByRole('button')
+      .map((button) => button.textContent)
+  }
+
+  it('offers Replace only on targets held outside the app or by another registry', async () => {
+    const api = renderCollided([
+      { target: '~/.claude/skills', state: 'external' },
+      { target: '~/.config/goose/skills', state: 'other-registry' },
+      { target: '~/.agents/skills', state: 'not-installed' },
+      { target: '~/.zencoder/skills', state: 'installed', installedVersion: 'deadbee' },
+    ])
+    fireEvent.click(await screen.findByText('Alpha'))
+
+    const onThisMac = await screen.findByRole('region', { name: 'On this Mac' })
+    expect(
+      within(onThisMac)
+        .getAllByRole('button', { name: /^Replace/ })
+        .map((button) => button.getAttribute('aria-label'))
+    ).toEqual(['Replace in Claude Code', 'Replace in Goose'])
+    expect(mainActions()[0]).toBe('Install to all')
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Install to all' }).click()
+    })
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    const request = vi.mocked(api.install).mock.lastCall![0]
+    expect(request.targets).toEqual(['~/.agents/skills'])
+    expect(request).not.toHaveProperty('replaceTargets')
+  })
+
+  it('replaces one target after the user confirms', async () => {
+    const api = renderCollided([
+      { target: '~/.claude/skills', state: 'external' },
+      { target: '~/.config/goose/skills', state: 'other-registry' },
+      { target: '~/.agents/skills', state: 'not-installed' },
+    ])
+    fireEvent.click(await screen.findByText('Alpha'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace in Claude Code' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Replace skill?' })
+    expect(
+      within(dialog)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual(['Claude Code'])
+    expect(api.install).not.toHaveBeenCalled()
+
+    await act(async () => {
+      within(dialog).getByRole('button', { name: 'Replace' }).click()
+    })
+    expect(api.install).toHaveBeenCalledTimes(1)
+    expect(api.install).toHaveBeenLastCalledWith({
+      registryId: REG,
+      folderName: 'alpha',
+      mirrorRevision: 'deadbeef',
+      targets: ['~/.claude/skills'],
+      replaceTargets: ['~/.claude/skills'],
+    })
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['removed from its registry', { softDeleted: true }],
+    ['orphaned', { orphaned: true }],
+  ])('does not offer Replace for a skill %s', async (_, overrides) => {
+    renderCollided(
+      [
+        { target: '~/.claude/skills', state: 'external' },
+        { target: '~/.config/goose/skills', state: 'other-registry' },
+        { target: '~/.agents/skills', state: 'installed', installedVersion: 'deadbee' },
+        { target: '~/.zencoder/skills', state: 'installed', installedVersion: 'deadbee' },
+      ],
+      overrides
+    )
+    fireEvent.click(await screen.findByText('Alpha'))
+
+    const detail = screen.getByRole('region', { name: 'Skill detail' })
+    expect(within(detail).queryByRole('button', { name: /^Replace/ })).not.toBeInTheDocument()
+  })
+
+  it('needs the stale acknowledgement before replacing from a stale snapshot', async () => {
+    const api = renderCollided(
+      [
+        { target: '~/.claude/skills', state: 'external' },
+        { target: '~/.agents/skills', state: 'not-installed' },
+      ],
+      { stale: true }
+    )
+    fireEvent.click(await screen.findByText('Alpha'))
+
+    expect(screen.getByRole('button', { name: 'Replace in Claude Code' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Acknowledge stale snapshot' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace in Claude Code' }))
+    await act(async () => {
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace' }).click()
+    })
+    expect(api.install).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        targets: ['~/.claude/skills'],
+        replaceTargets: ['~/.claude/skills'],
+        acknowledgeStale: true,
+      })
+    )
+  })
+
+  it('sends nothing when the user cancels Replace all', async () => {
+    const api = renderCollided([
+      { target: '~/.claude/skills', state: 'external' },
+      { target: '~/.config/goose/skills', state: 'other-registry' },
+      { target: '~/.agents/skills', state: 'installed', installedVersion: 'deadbee' },
+      { target: '~/.zencoder/skills', state: 'installed', installedVersion: 'deadbee' },
+    ])
+    fireEvent.click(await screen.findByText('Alpha'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Replace skill?' })
+    expect(
+      within(dialog)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual(['Claude Code', 'Goose'])
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(api.install).not.toHaveBeenCalled()
+  })
+
+  it('makes the main button Replace all once no target is empty', async () => {
+    renderCollided([
+      { target: '~/.claude/skills', state: 'external' },
+      { target: '~/.config/goose/skills', state: 'other-registry' },
+      { target: '~/.agents/skills', state: 'installed', installedVersion: 'deadbee' },
+      { target: '~/.zencoder/skills', state: 'update-available', installedVersion: 'abc1234' },
+    ])
+    fireEvent.click(await screen.findByText('Alpha'))
+
+    expect(mainActions()).toEqual(['Replace all', 'Remove'])
+  })
+})
+
 describe('Update all', () => {
   it('is absent when nothing is behind', async () => {
     const skills = [

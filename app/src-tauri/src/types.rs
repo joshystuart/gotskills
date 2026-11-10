@@ -278,6 +278,9 @@ pub struct InstallRequest {
     pub mirror_revision: String,
     #[serde(default)]
     pub acknowledge_stale: Option<bool>,
+    /// Collided targets the user confirmed replacing; a subset of `targets`.
+    #[serde(default)]
+    pub replace_targets: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -631,6 +634,16 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(request.acknowledge_stale, None);
+        assert_eq!(request.replace_targets, None);
+        let replacing: InstallRequest = serde_json::from_value(json!({
+            "registryId": "r", "folderName": "f", "targets": ["~/.agents/skills"],
+            "mirrorRevision": "abc", "replaceTargets": ["~/.agents/skills"]
+        }))
+        .unwrap();
+        assert_eq!(
+            replacing.replace_targets,
+            Some(vec!["~/.agents/skills".to_string()])
+        );
         let update: UpdateRegistryRequest =
             serde_json::from_value(json!({ "id": "r", "autoUpdate": true })).unwrap();
         assert_eq!(update.auto_update, Some(true));
