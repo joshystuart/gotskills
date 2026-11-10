@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { RegistrySyncStatus, SkillSummary, SyncStatus } from '../../shared/ipc'
+import type {
+  InstallTargetStatus,
+  RegistrySyncStatus,
+  SkillSummary,
+  SyncStatus,
+} from '../../shared/ipc'
 import {
   ACCESS_REQUIRED_GUIDANCE,
   bannerMessage,
@@ -11,6 +16,8 @@ import {
   registryOwnerLabel,
   registryRecordLabel,
   registryStatusLabel,
+  rowAttention,
+  skillsInView,
   staleSkillNotice,
   syncLabel,
 } from './cataloguePresentation'
@@ -165,6 +172,107 @@ describe('registryOwnerLabel', () => {
     '',
   ])('does not invent an owner for %s', (url) => {
     expect(registryOwnerLabel(url)).toBeNull()
+  })
+})
+
+function target(id: string, label: string): InstallTargetStatus {
+  return { id, label, shared: false, visible: true, agents: [] }
+}
+
+const CLAUDE = target('~/.claude/skills', 'Claude Code')
+const AGENTS = target('~/.agents/skills', 'Agents')
+
+describe('rowAttention', () => {
+  it('reports External, quietly, for targets holding the skill outside the app', () => {
+    const external = skill({
+      perTarget: [
+        { target: CLAUDE.id, state: 'external' },
+        { target: AGENTS.id, state: 'not-installed' },
+      ],
+    })
+
+    const attention = rowAttention(external, [CLAUDE, AGENTS])
+
+    expect(attention?.label.cellText).toBe('External')
+    expect(attention?.label.tone).toBe('quiet')
+    expect(attention?.targets).toEqual([CLAUDE])
+  })
+
+  it('reports Other registry, quietly, for targets held by another registry', () => {
+    const held = skill({
+      perTarget: [
+        { target: CLAUDE.id, state: 'not-installed' },
+        { target: AGENTS.id, state: 'other-registry' },
+      ],
+    })
+
+    const attention = rowAttention(held, [CLAUDE, AGENTS])
+
+    expect(attention?.label.cellText).toBe('Other registry')
+    expect(attention?.label.tone).toBe('quiet')
+    expect(attention?.targets).toEqual([AGENTS])
+  })
+
+  it.each([
+    ['needs-repair', 'Repair'],
+    ['removed-from-registry', 'Removed'],
+    ['update-available', 'Update'],
+  ] as const)('ranks %s above a collision', (state, cellText) => {
+    for (const collided of ['external', 'other-registry'] as const) {
+      const both = skill({
+        perTarget: [
+          { target: CLAUDE.id, state },
+          { target: AGENTS.id, state: collided },
+        ],
+      })
+
+      expect(rowAttention(both, [CLAUDE, AGENTS])?.label.cellText).toBe(cellText)
+    }
+  })
+
+  it('ranks Orphaned above a collision', () => {
+    const both = skill({
+      orphaned: true,
+      perTarget: [
+        { target: CLAUDE.id, state: 'installed' },
+        { target: AGENTS.id, state: 'external' },
+      ],
+    })
+
+    expect(rowAttention(both, [CLAUDE, AGENTS])?.label.cellText).toBe('Orphaned')
+  })
+
+  it('reports External over Other registry when a skill has both', () => {
+    const both = skill({
+      perTarget: [
+        { target: CLAUDE.id, state: 'other-registry' },
+        { target: AGENTS.id, state: 'external' },
+      ],
+    })
+
+    expect(rowAttention(both, [CLAUDE, AGENTS])?.label.cellText).toBe('External')
+  })
+})
+
+describe('skillsInView', () => {
+  it('leaves skills that only collide out of the Installed view', () => {
+    const managed = skill({
+      id: 'r1/managed',
+      perTarget: [
+        { target: CLAUDE.id, state: 'installed' },
+        { target: AGENTS.id, state: 'external' },
+      ],
+    })
+    const external = skill({
+      id: 'r1/external',
+      perTarget: [{ target: CLAUDE.id, state: 'external' }],
+    })
+    const held = skill({
+      id: 'r1/held',
+      perTarget: [{ target: CLAUDE.id, state: 'other-registry' }],
+    })
+
+    expect(skillsInView([managed, external, held], 'installed')).toEqual([managed])
   })
 })
 

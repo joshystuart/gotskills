@@ -260,13 +260,41 @@ export interface AttentionLabel {
   glyph: string
   text: string
   cellText: string
+  /** True for an Installation Collision: the targets hold a copy Got Skills didn't install. */
+  collision: boolean
 }
 
 const ATTENTION_LABELS: [ReconcileState, AttentionLabel][] = [
-  ['needs-repair', { tone: 'bad', glyph: '!', text: 'Needs repair', cellText: 'Repair' }],
-  ['removed-from-registry', { tone: 'bad', glyph: '×', text: 'Removed', cellText: 'Removed' }],
-  ['orphaned', { tone: 'quiet', glyph: '⊘', text: 'Orphaned', cellText: 'Orphaned' }],
-  ['update-available', { tone: 'warn', glyph: '↑', text: 'Update ready', cellText: 'Update' }],
+  [
+    'needs-repair',
+    { tone: 'bad', glyph: '!', text: 'Needs repair', cellText: 'Repair', collision: false },
+  ],
+  [
+    'removed-from-registry',
+    { tone: 'bad', glyph: '×', text: 'Removed', cellText: 'Removed', collision: false },
+  ],
+  [
+    'orphaned',
+    { tone: 'quiet', glyph: '⊘', text: 'Orphaned', cellText: 'Orphaned', collision: false },
+  ],
+  [
+    'update-available',
+    { tone: 'warn', glyph: '↑', text: 'Update ready', cellText: 'Update', collision: false },
+  ],
+  [
+    'external',
+    { tone: 'quiet', glyph: '·', text: 'External', cellText: 'External', collision: true },
+  ],
+  [
+    'other-registry',
+    {
+      tone: 'quiet',
+      glyph: '·',
+      text: 'Held by another registry',
+      cellText: 'Other registry',
+      collision: true,
+    },
+  ],
 ]
 
 export interface RowAttention {

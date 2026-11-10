@@ -738,6 +738,10 @@ button:disabled {
   white-space: normal;
 }
 
+.installed-targets > span {
+  display: block;
+}
+
 .installed-cell:hover .installed-targets,
 .skill-row:focus-visible .installed-targets {
   display: block;

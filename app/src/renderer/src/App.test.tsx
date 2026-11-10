@@ -671,7 +671,7 @@ describe('App shell', () => {
     await screen.findByText('External skill')
     fireEvent.click(screen.getByText('External skill'))
 
-    expect(within(screen.getByRole('option')).getByText('—')).toBeInTheDocument()
+    expect(within(screen.getByRole('option')).getByText('External')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
     expect(uninstall).not.toHaveBeenCalled()
   })
@@ -1484,7 +1484,7 @@ describe('Catalogue table', () => {
         name: 'Alpha',
         description: 'First skill',
         perTarget: [
-          { target: '~/.claude/skills', state: 'external' },
+          { target: '~/.claude/skills', state: 'not-installed' },
           { target: '~/.agents/skills', state: 'not-installed' },
         ],
       }),
@@ -1509,6 +1509,69 @@ describe('Catalogue table', () => {
     expect(
       within(beta).getByText('Installed in Claude Code, Cursor. Update ready in Cursor')
     ).toBeInTheDocument()
+  })
+
+  it('labels a skill that is only external with where it collides instead of a dash', async () => {
+    const skills = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'external' },
+          { target: '~/.agents/skills', state: 'not-installed' },
+        ],
+      }),
+    ]
+    render(<App api={fakeApi(syncStatus(), skills)} />)
+    await screen.findByText('Alpha')
+    const row = screen.getByRole('option')
+
+    expect(within(row).queryByText('—')).not.toBeInTheDocument()
+    expect(within(row).queryByText('Not installed')).not.toBeInTheDocument()
+    expect(within(row).getByText('External')).toBeInTheDocument()
+    expect(within(row).getByText('External in Claude Code')).toBeInTheDocument()
+    expect(within(row).getByRole('tooltip', { hidden: true })).toHaveTextContent(
+      /^External: Claude Code$/
+    )
+  })
+
+  it('shows the install count with a collision label, unless an update outranks it', async () => {
+    const skills = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'First skill',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'installed' },
+          { target: '~/.agents/skills', state: 'external' },
+        ],
+      }),
+      skill({
+        id: 'beta',
+        name: 'Beta',
+        description: 'Second skill',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'update-available' },
+          { target: '~/.agents/skills', state: 'external' },
+        ],
+      }),
+    ]
+    render(<App api={fakeApi(syncStatus(), skills)} />)
+    await screen.findByText('Alpha')
+    const [alpha, beta] = screen.getAllByRole('option')
+
+    expect(within(alpha).getByText('1')).toBeInTheDocument()
+    expect(within(alpha).getByText('External')).toBeInTheDocument()
+    expect(
+      within(alpha).getByText('Installed in Claude Code. External in Cursor')
+    ).toBeInTheDocument()
+    expect(within(alpha).getByRole('tooltip', { hidden: true })).toHaveTextContent(
+      'Claude CodeExternal: Cursor'
+    )
+    expect(within(beta).getByText('1')).toBeInTheDocument()
+    expect(within(beta).getByText('Update')).toBeInTheDocument()
+    expect(within(beta).queryByText('External')).not.toBeInTheDocument()
   })
 
   it('marks a row whose skill was removed from its registry', async () => {
@@ -1731,7 +1794,7 @@ describe('Catalogue table', () => {
     render(<App api={api} />)
     fireEvent.click(await screen.findByText('Alpha'))
 
-    expect(within(screen.getByRole('option')).getByText('—')).toBeInTheDocument()
+    expect(within(screen.getByRole('option')).getByText('Other registry')).toBeInTheDocument()
     const onThisMac = await screen.findByRole('region', { name: 'On this Mac' })
     expect(within(onThisMac).getByText('Held by another registry')).toBeInTheDocument()
     expect(
@@ -1908,9 +1971,9 @@ describe('Catalogue table', () => {
     ['update-available', '2'],
     ['needs-repair', '2'],
     ['removed-from-registry', '2'],
-    ['external', '—'],
+    ['external', 'External'],
     ['orphaned', '—'],
-    ['other-registry', '—'],
+    ['other-registry', 'Other registry'],
     ['not-installed', '—'],
   ] as const)('shows %s on both targets as %s', async (state, shown) => {
     const skills = [
