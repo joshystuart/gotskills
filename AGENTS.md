@@ -33,3 +33,12 @@ Don't add author or attribution lines to commit messages, such as `Co-Authored-B
 ## Releases
 
 For a feature or a fix, bump the patch version in `app/package.json` and `app/package-lock.json` in the same PR, because merging a new version to `main` publishes a release. Refactors, tests and docs don't bump.
+
+## Build experiments
+
+Coding-agent setups are compared with [build-bench](https://github.com/joshystuart/build-bench). Run `build-bench all` from the repository root.
+
+- `.benchrc` is the current Experiment: the base commit, the plan, and the Variants with their prompts and skills.
+- Prompts live in `.bench/prompts/<variant>.md`. Skills are listed by path in `.benchrc`, not copied into the repository.
+- Results go to `.bench/results/`, which build-bench keeps out of git. Don't edit `.bench/` while working on the app.
+- A plan in `.scratch/<plan>/` holds only the plan, because build-bench copies the whole folder into every Trial. Reports and notes about past experiments go in `.scratch/build-experiments/`.

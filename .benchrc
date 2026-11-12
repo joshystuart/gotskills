@@ -1,0 +1,36 @@
+name: subagent-styles
+repo: .
+base: 6ec95b3 # before #16, which built this plan
+plan: .scratch/existing-skill-collisions
+pre_build: [npm ci, cd app && npm ci]
+checks: npm run check
+concurrency: 1
+auth: subscription
+claude_version: 2.1.319
+limits: { timeout_minutes: 240 }
+languages: [typescript, rust]
+variants:
+  - name: pocock-subagents
+    prompt: .bench/prompts/pocock-subagents.md
+    model: claude-opus-5-5
+    effort: high
+    skills:
+      - ~/.agents/skills/implement-spec
+      - ~/.agents/skills/tdd
+      - ~/.agents/skills/code-review
+  - name: pipeline-subagents
+    prompt: .bench/prompts/pipeline-subagents.md
+    model: claude-opus-5-5
+    effort: high
+    skills:
+      - ~/.agents/skills/xf-build
+      - ~/.agents/skills/xf-common
+      - ~/.agents/skills/xf-plan
+      - ~/.agents/skills/xf-plan-grill
+      - ~/.agents/skills/xf-plan-spec
+      - ~/.agents/skills/xf-plan-tickets
+      - ~/.agents/skills/xf-review
+  - name: simple-subagents
+    prompt: .bench/prompts/simple-subagents.md
+    model: claude-opus-5-5
+    effort: high
