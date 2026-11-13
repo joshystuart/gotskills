@@ -6,7 +6,6 @@ pre_build: [npm ci, cd app && npm ci]
 checks: npm run check
 concurrency: 1
 auth: subscription
-claude_version: 2.1.322
 limits: { timeout_minutes: 240 }
 languages: [typescript, rust]
 variants:
