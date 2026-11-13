@@ -1,0 +1,36 @@
+name: noise-floor
+repo: .
+base: 6ec95b3 # before #16, which built this plan
+plan: .scratch/existing-skill-collisions
+pre_build: [npm ci, cd app && npm ci]
+checks: npm run check
+concurrency: 1
+auth: subscription
+limits: { timeout_minutes: 240 }
+languages: [typescript, rust]
+variants:
+  - name: simple-a
+    prompt: .bench/prompts/simple-subagents.md
+    model: claude-opus-5-5
+    effort: high
+    repeats: 3
+  - name: simple-b
+    prompt: .bench/prompts/simple-subagents.md
+    model: claude-opus-5-5
+    effort: high
+    repeats: 3
+judges:
+  - name: agent-1
+    type: claude
+    model: claude-opus-5-5
+    effort: high
+    limits: { timeout_minutes: 30, max_budget_usd: 5 }
+  - name: agent-2
+    type: claude
+    model: claude-opus-5-5
+    effort: high
+    limits: { timeout_minutes: 30, max_budget_usd: 5 }
+  - name: other-provider
+    type: api
+    model: openrouter/openai/gpt-6.1-sol # check this slug on openrouter.ai/openai
+    limits: { timeout_minutes: 10 }
