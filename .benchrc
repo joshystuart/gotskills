@@ -9,10 +9,18 @@ auth: subscription
 limits: { timeout_minutes: 240 }
 languages: [typescript, rust]
 variants:
+  - name: simple-subagents
+    prompt: .bench/prompts/simple-subagents.md
+    model: claude-opus-5-5
+    effort: medium
+  - name: simple-no-subagents
+    prompt: .bench/prompts/simple-subagents.md
+    model: claude-opus-5-5
+    effort: medium
   - name: pocock-subagents
     prompt: .bench/prompts/pocock-subagents.md
     model: claude-opus-5-5
-    effort: high
+    effort: medium
     skills:
       - ~/.agents/skills/implement-spec
       - ~/.agents/skills/tdd
@@ -20,7 +28,7 @@ variants:
   - name: pipeline-subagents
     prompt: .bench/prompts/pipeline-subagents.md
     model: claude-opus-5-5
-    effort: high
+    effort: medium
     skills:
       - ~/.agents/skills/xf-build
       - ~/.agents/skills/xf-common
@@ -29,7 +37,12 @@ variants:
       - ~/.agents/skills/xf-plan-spec
       - ~/.agents/skills/xf-plan-tickets
       - ~/.agents/skills/xf-review
-  - name: simple-subagents
-    prompt: .bench/prompts/simple-subagents.md
-    model: claude-opus-5-5
-    effort: high
+judges:
+  - name: gpt
+    type: copilot
+    model: gpt-6.1-terra
+  - name: sol
+    type: api
+    model: openrouter/openai/gpt-6.1-sol # check this slug on openrouter.ai/openai
+    limits: { timeout_minutes: 10 }
+merge_judge: gpt

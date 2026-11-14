@@ -1,0 +1,1 @@
+Build based on the plan details in .scratch/existing-skill-collisions. DO NOT use subagents to build each ticket. Instead, just build in the main agent. Compact the context window if it reaches 400k tokens.
