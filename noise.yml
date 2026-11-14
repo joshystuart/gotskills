@@ -20,17 +20,14 @@ variants:
     effort: high
     repeats: 3
 judges:
-  - name: agent-1
-    type: claude
-    model: claude-opus-5-5
-    effort: high
-    limits: { timeout_minutes: 30, max_budget_usd: 5 }
-  - name: agent-2
-    type: claude
-    model: claude-opus-5-5
-    effort: high
-    limits: { timeout_minutes: 30, max_budget_usd: 5 }
-  - name: other-provider
+  - name: gpt
+    type: copilot
+    model: gpt-6.1-terra
+  - name: gemini
+    type: copilot
+    model: gemini-4-hydrogen
+  - name: sol
     type: api
     model: openrouter/openai/gpt-6.1-sol # check this slug on openrouter.ai/openai
     limits: { timeout_minutes: 10 }
+merge_judge: gpt
