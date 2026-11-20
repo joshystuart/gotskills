@@ -5,14 +5,21 @@ use std::sync::OnceLock;
 
 const MAX_LENGTH: usize = 280;
 
-fn patterns() -> &'static [Regex; 3] {
-    static PATTERNS: OnceLock<[Regex; 3]> = OnceLock::new();
+fn patterns() -> &'static [Regex] {
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
     PATTERNS.get_or_init(|| {
+        let temp_dir = std::env::temp_dir();
+        let temp_dir = regex::escape(temp_dir.to_string_lossy().trim_end_matches('/'));
         [
-            Regex::new(r"/Users/[^\s:]+").expect("valid regex"),
-            Regex::new(r"/home/[^\s:]+").expect("valid regex"),
-            Regex::new(r"/var/folders/[^\s:]+").expect("valid regex"),
+            "/Users/".to_string(),
+            "/home/".to_string(),
+            "/var/folders/".to_string(),
+            "/tmp/".to_string(),
+            format!("{temp_dir}/"),
         ]
+        .iter()
+        .map(|prefix| Regex::new(&format!(r"{prefix}[^\s:]+")).expect("valid regex"))
+        .collect()
     })
 }
 
@@ -36,6 +43,18 @@ mod tests {
                 "failed /Users/alice/project/file.ts:12 /home/bob/private.txt /var/folders/xy/secret/item"
             ),
             "failed ~:12 ~ ~"
+        );
+    }
+
+    #[test]
+    fn redacts_linux_and_system_temporary_paths() {
+        let system_temp = std::env::temp_dir().join("secret/item");
+        assert_eq!(
+            redact_error(&format!(
+                "failed /tmp/.tmpAbC/secret {}",
+                system_temp.display()
+            )),
+            "failed ~ ~"
         );
     }
 
