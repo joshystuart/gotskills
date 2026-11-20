@@ -3,7 +3,10 @@ repo: .
 base: 6ec95b3 # before #16, which built this plan
 plan: .scratch/existing-skill-collisions
 pre_build: [npm ci, cd app && npm ci]
-runtime_check: node --version | grep -q '^v24\.' && cargo --version
+env:
+  PATH: $HOME/.cargo/bin:${PATH}
+  TMPDIR: $HOME/.cache/bench-tmp # under /home, so the app's error redaction covers temp paths as /var/folders does on macOS
+runtime_check: mkdir -p "$TMPDIR" && node --version | grep -q '^v24\.' && cargo --version
 checks:
   - name: format
     command: npm run format:check
