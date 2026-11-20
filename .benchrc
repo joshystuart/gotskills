@@ -3,24 +3,40 @@ repo: .
 base: 6ec95b3 # before #16, which built this plan
 plan: .scratch/existing-skill-collisions
 pre_build: [npm ci, cd app && npm ci]
-checks: npm run check
+runtime_check: node --version | grep -q '^v24\.' && cargo --version
+checks:
+  - name: format
+    command: npm run format:check
+  - name: typecheck
+    command: cd app && npm run typecheck
+  - name: test
+    command: cd app && npx vitest run --exclude scripts/releaseWorkflow.test.ts # its `sed -i ''` only runs on macOS
+  - name: rust
+    command: cd app && npm run test:rust
+  - name: app-size
+    command: cd app && node --test scripts/check-app-size.test.cjs
+check_base: true
+judge_guidance: .bench/judge-guidance.md
 concurrency: 1
 auth: subscription
-limits: { timeout_minutes: 240 }
+limits: { timeout_minutes: 240, max_budget_usd: 15 }
 languages: [typescript, rust]
 variants:
   - name: simple-subagents
     prompt: .bench/prompts/simple-subagents.md
     model: claude-sonnet-5-5
     effort: medium
+    repeats: 4
   - name: simple-no-subagents
-    prompt: .bench/prompts/simple-subagents.md
+    prompt: .bench/prompts/simple-no-subagents.md
     model: claude-sonnet-5-5
     effort: medium
+    repeats: 4
   - name: pocock-subagents
     prompt: .bench/prompts/pocock-subagents.md
     model: claude-sonnet-5-5
     effort: medium
+    repeats: 4
     skills:
       - ~/.agents/skills/implement-spec
       - ~/.agents/skills/tdd
@@ -29,6 +45,7 @@ variants:
     prompt: .bench/prompts/pipeline-subagents.md
     model: claude-sonnet-5-5
     effort: medium
+    repeats: 4
     skills:
       - ~/.agents/skills/xf-build
       - ~/.agents/skills/xf-common
@@ -41,8 +58,12 @@ judges:
   - name: gpt
     type: copilot
     model: gpt-6.1-terra
-  - name: sol
+  - name: deepseek
     type: api
-    model: openrouter/openai/gpt-6.1-sol # check this slug on openrouter.ai/openai
+    model: openrouter/deepseek/deepseek-v4.1-flash
+    limits: { timeout_minutes: 10 }
+  - name: glm
+    type: api
+    model: openrouter/z-ai/glm-5.3
     limits: { timeout_minutes: 10 }
 merge_judge: gpt
