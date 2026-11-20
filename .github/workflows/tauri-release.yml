@@ -103,7 +103,8 @@ jobs:
         working-directory: app
         run: |
           npm pkg set version="$RELEASE_VERSION"
-          sed -i '' '1,/^version = /s/^version = .*/version = "'"$RELEASE_VERSION"'"/' src-tauri/Cargo.toml
+          sed -i.bak '1,/^version = /s/^version = .*/version = "'"$RELEASE_VERSION"'"/' src-tauri/Cargo.toml
+          rm src-tauri/Cargo.toml.bak
           test "$(node -p "require('./package.json').version")" = "$RELEASE_VERSION"
           grep -Fx "version = \"$RELEASE_VERSION\"" src-tauri/Cargo.toml
 
@@ -160,7 +161,8 @@ jobs:
         working-directory: app
         run: |
           npm pkg set version="$RELEASE_VERSION"
-          sed -i '' '1,/^version = /s/^version = .*/version = "'"$RELEASE_VERSION"'"/' src-tauri/Cargo.toml
+          sed -i.bak '1,/^version = /s/^version = .*/version = "'"$RELEASE_VERSION"'"/' src-tauri/Cargo.toml
+          rm src-tauri/Cargo.toml.bak
           test "$(node -p "require('./package.json').version")" = "$RELEASE_VERSION"
           grep -Fx "version = \"$RELEASE_VERSION\"" src-tauri/Cargo.toml
 

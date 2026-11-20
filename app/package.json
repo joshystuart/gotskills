@@ -1,7 +1,7 @@
 {
   "name": "got-skills",
-  "version": "0.0.17",
-  "description": "Got Skills \u2014 internal app store for agent skills (Phase 0 PoC)",
+  "version": "0.0.18",
+  "description": "Got Skills — internal app store for agent skills (Phase 0 PoC)",
   "author": "Got Skills",
   "scripts": {
     "dev": "node scripts/dev.mjs",
