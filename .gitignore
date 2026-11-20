@@ -143,6 +143,7 @@ vite.config.ts.timestamp-*
 .vite/
 
 .DS_Store
+._*
 .idea
 .scratch
 # Per-worktree dev instance state (app/scripts/dev.mjs)
