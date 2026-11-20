@@ -1,1 +1,1 @@
-Build based on the plan details in .scratch/existing-skill-collisions. Use subagents to build each ticket, in parallel, if possible.
+Build the plan in {{plan}}. Use subagents to build each ticket, in parallel where possible. Don't stop to ask questions; work until every ticket is done.
