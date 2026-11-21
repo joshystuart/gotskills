@@ -7,7 +7,8 @@ pre_build: [npm ci, cd app && npm ci]
 env:
   PATH: $HOME/.cargo/bin:${PATH}
   TMPDIR: $HOME/.cache/bench-tmp # under /home, so the app's error redaction covers temp paths as /var/folders does on macOS
-  CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0" # wait for background subagents instead of stopping them 10m after the last turn; limits.timeout_minutes still caps the Trial
+  CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: '0' # wait for background subagents instead of stopping them 10m after the last turn; limits.timeout_minutes still caps the Trial
+  CARGO_TARGET_DIR: $HOME/.cache/bench-cargo-target # one Rust build folder for every checkout, so worktrees reuse compiled dependencies and wait on each other instead of each compiling ~5 GB at once
 runtime_check: mkdir -p "$TMPDIR" && node --version | grep -q '^v24\.' && cargo --version
 checks:
   - name: format
@@ -61,14 +62,11 @@ variants:
       - ~/.agents/skills/xf-review
 judges:
   - name: gpt
-    type: copilot
-    model: gpt-6.1-terra
-  - name: deepseek
     type: api
-    model: openrouter/deepseek/deepseek-v4.1-flash
-    limits: { timeout_minutes: 10 }
-  - name: glm
+    model: openrouter/openai/gpt-6.1-terra
+    limits: { timeout_minutes: 20 }
+  - name: gemini
     type: api
-    model: openrouter/z-ai/glm-5.3
-    limits: { timeout_minutes: 10 }
+    model: openrouter/google/gemini-4-argon
+    limits: { timeout_minutes: 20 }
 merge_judge: gpt
