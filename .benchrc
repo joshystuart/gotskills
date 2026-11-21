@@ -68,4 +68,8 @@ judges:
     type: api
     model: openrouter/google/gemini-4-argon
     limits: { timeout_minutes: 20 }
+  - name: hy4
+    type: api
+    model: openrouter/tencent/hy4
+    limits: { timeout_minutes: 20 }
 merge_judge: gpt
