@@ -47,30 +47,18 @@ variants:
       - ~/.agents/skills/implement-spec
       - ~/.agents/skills/tdd
       - ~/.agents/skills/code-review
-  - name: pipeline-subagents
-    prompt: prompts/pipeline-subagents.md
-    model: claude-sonnet-5-5
-    effort: medium
-    repeats: 1
-    skills:
-      - ~/.agents/skills/xf-build
-      - ~/.agents/skills/xf-common
-      - ~/.agents/skills/xf-plan
-      - ~/.agents/skills/xf-plan-grill
-      - ~/.agents/skills/xf-plan-spec
-      - ~/.agents/skills/xf-plan-tickets
-      - ~/.agents/skills/xf-review
 judges:
-  - name: gpt
+  - name: terra
     type: api
     model: openrouter/openai/gpt-6.1-terra
     limits: { timeout_minutes: 20 }
+  - name: sol
+    type: api
+    model: openrouter/openai/gpt-6.1-sol
+    limits: { timeout_minutes: 20 }
+    compare: { max_pairs: 3 } # one pair per Trial, so no Trial is used twice
   - name: gemini
     type: api
     model: openrouter/google/gemini-4-argon
     limits: { timeout_minutes: 20 }
-  - name: hy4
-    type: api
-    model: openrouter/tencent/hy4
-    limits: { timeout_minutes: 20 }
-merge_judge: gpt
+merge_judge: terra
