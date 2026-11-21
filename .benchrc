@@ -6,6 +6,7 @@ pre_build: [npm ci, cd app && npm ci]
 env:
   PATH: $HOME/.cargo/bin:${PATH}
   TMPDIR: $HOME/.cache/bench-tmp # under /home, so the app's error redaction covers temp paths as /var/folders does on macOS
+  CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0" # wait for background subagents instead of stopping them 10m after the last turn; limits.timeout_minutes still caps the Trial
 runtime_check: mkdir -p "$TMPDIR" && node --version | grep -q '^v24\.' && cargo --version
 checks:
   - name: format
