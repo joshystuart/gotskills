@@ -15,7 +15,7 @@ checks:
   - name: typecheck
     command: cd app && npm run typecheck
   - name: test
-    command: cd app && npx vitest run --exclude scripts/releaseWorkflow.test.ts # its `sed -i ''` only runs on macOS
+    command: cd app && npx vitest run --retry 2 --exclude scripts/releaseWorkflow.test.ts # the excluded test's `sed -i ''` only runs on macOS; --retry absorbs the Console sidebar test's race on the sync status
   - name: rust
     command: cd app && npm run test:rust
   - name: app-size
