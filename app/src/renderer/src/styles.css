@@ -1115,14 +1115,13 @@ button:disabled {
 
 .skill-file-metadata {
   display: grid;
-  gap: 6px;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
   margin: 12px 0;
 }
 
 .skill-file-metadata-row {
-  display: grid;
-  grid-template-columns: minmax(80px, max-content) 1fr;
-  gap: 12px;
+  display: contents;
 }
 
 .skill-file-metadata-row dt {
