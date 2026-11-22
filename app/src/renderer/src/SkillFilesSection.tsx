@@ -1,6 +1,5 @@
 import { useEffect, useState, type JSX } from 'react'
-import DOMPurify from 'dompurify'
-import { marked } from 'marked'
+import { MarkdownFileView } from './MarkdownFileView'
 import type { RendererApi, SkillFileContent, SkillFileEntry, SkillSummary } from '../../shared/ipc'
 
 interface SkillFilesSectionProps {
@@ -25,10 +24,6 @@ function isMarkdownPath(path: string): boolean {
   return lower.endsWith('.md') || lower.endsWith('.markdown') || lower.endsWith('.mdx')
 }
 
-function renderMarkdown(source: string): string {
-  return DOMPurify.sanitize(marked.parse(source, { async: false }))
-}
-
 export function SkillFilesSection({
   api,
   skill,
@@ -39,7 +34,6 @@ export function SkillFilesSection({
   const [unavailable, setUnavailable] = useState(false)
   const [selected, setSelected] = useState<SkillFileEntry | null>(null)
   const [content, setContent] = useState<SkillFileContent | null>(null)
-  const [raw, setRaw] = useState(false)
 
   useEffect(() => {
     onFileOpenChange(selected !== null)
@@ -51,7 +45,6 @@ export function SkillFilesSection({
     setUnavailable(false)
     setSelected(null)
     setContent(null)
-    setRaw(false)
     api
       .listSkillFiles({ registryId: skill.registryId, folderName: skill.folderName })
       .then((list) => {
@@ -74,7 +67,6 @@ export function SkillFilesSection({
     if (selected === null) return
     let live = true
     setContent(null)
-    setRaw(false)
     api
       .readSkillFile({
         registryId: skill.registryId,
@@ -116,23 +108,7 @@ export function SkillFilesSection({
               </p>
             ) : null}
             {isMarkdownPath(selected.path) ? (
-              <>
-                <button
-                  type="button"
-                  className="skill-file-toggle"
-                  onClick={() => setRaw((prev) => !prev)}
-                >
-                  {raw ? 'Rendered' : 'Raw'}
-                </button>
-                {raw ? (
-                  <pre className="skill-file-source">{content.content}</pre>
-                ) : (
-                  <div
-                    className="skill-file-markdown"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(content.content ?? '') }}
-                  />
-                )}
-              </>
+              <MarkdownFileView source={content.content ?? ''} />
             ) : (
               <pre className="skill-file-source">{content.content}</pre>
             )}

@@ -1071,8 +1071,7 @@ button:disabled {
   flex: 1;
 }
 
-.skill-file-back,
-.skill-file-toggle {
+.skill-file-back {
   padding: 4px 10px;
   border: 1px solid var(--line-2);
   border-radius: 6px;
@@ -1081,13 +1080,60 @@ button:disabled {
   font-size: 0.78125rem;
 }
 
-.skill-file-back:hover,
-.skill-file-toggle:hover {
+.skill-file-back:hover {
   background: var(--raised);
 }
 
-.skill-file-toggle {
+.skill-file-tabs {
+  display: inline-flex;
   margin-bottom: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.skill-file-tab {
+  padding: 4px 12px;
+  border: 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.78125rem;
+}
+
+.skill-file-tab + .skill-file-tab {
+  border-left: 1px solid var(--line-2);
+}
+
+.skill-file-tab:hover {
+  background: var(--raised);
+}
+
+.skill-file-tab[aria-selected='true'] {
+  background: var(--accent-bg);
+  color: var(--text);
+}
+
+.skill-file-metadata {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.skill-file-metadata-row {
+  display: grid;
+  grid-template-columns: minmax(80px, max-content) 1fr;
+  gap: 12px;
+}
+
+.skill-file-metadata-row dt {
+  color: var(--muted);
+  font-size: 0.78125rem;
+}
+
+.skill-file-metadata-row dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
 }
 
 .skill-file-not-viewable,
