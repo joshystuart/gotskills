@@ -4049,27 +4049,78 @@ describe('Skill file viewer', () => {
     expect(container.querySelector('.skill-file-markdown')?.innerHTML).not.toContain('<script>')
   })
 
-  it('toggles between rendered markdown and raw source in a preformatted block', async () => {
-    const readSkillFile = vi.fn().mockResolvedValue({
-      path: 'SKILL.md',
-      sizeBytes: 512,
-      kind: 'text',
-      content: '---\nname: alpha\n---\n\n# Title\n',
-    })
-    render(<App api={viewerApi(readSkillFile)} />)
+  function markdownApi(content: string): RendererApi {
+    return viewerApi(
+      vi.fn().mockResolvedValue({ path: 'SKILL.md', sizeBytes: 512, kind: 'text', content })
+    )
+  }
+
+  it('leaves frontmatter out of the rendered document', async () => {
+    const { container } = render(
+      <App api={markdownApi('---\nname: alpha\ndescription: First skill\n---\n\n# Title\n')} />
+    )
 
     await openFile('SKILL.md')
     expect(await screen.findByRole('heading', { name: 'Title' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Document' })).toHaveAttribute('aria-selected', 'true')
+    const rendered = container.querySelector('.skill-file-markdown')
+    expect(rendered?.textContent).not.toContain('name: alpha')
+    expect(rendered?.querySelector('hr')).toBeNull()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Raw' }))
-    const section = screen.getByRole('region', { name: 'Files' })
-    const source = section.querySelector('pre.skill-file-source')
-    expect(source).not.toBeNull()
-    expect(source?.textContent).toContain('name: alpha')
-    expect(within(section).queryByRole('heading', { name: 'Title' })).toBeNull()
+  it('shows frontmatter as name and value pairs on the Metadata tab', async () => {
+    render(
+      <App
+        api={markdownApi(
+          '---\nname: alpha\ndescription: First skill\ntags: [a, b]\n---\n# Title\n'
+        )}
+      />
+    )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Rendered' }))
+    await openFile('SKILL.md')
+    fireEvent.click(await screen.findByRole('tab', { name: 'Metadata' }))
+    const panel = screen.getByRole('tabpanel', { name: 'Metadata' })
+    const terms = within(panel)
+      .getAllByRole('term')
+      .map((term) => term.textContent)
+    const values = within(panel)
+      .getAllByRole('definition')
+      .map((value) => value.textContent)
+    expect(terms).toEqual(['name', 'description', 'tags'])
+    expect(values).toEqual(['alpha', 'First skill', '["a","b"]'])
+    expect(screen.queryByRole('heading', { name: 'Title' })).toBeNull()
+  })
+
+  it('shows frontmatter that is not a mapping as its YAML source on the Metadata tab', async () => {
+    render(<App api={markdownApi('---\n- one\n- two\n---\n# Title\n')} />)
+
+    await openFile('SKILL.md')
+    fireEvent.click(await screen.findByRole('tab', { name: 'Metadata' }))
+    const panel = screen.getByRole('tabpanel', { name: 'Metadata' })
+    expect(panel.querySelector('pre')?.textContent).toBe('- one\n- two')
+  })
+
+  it('shows the whole file, frontmatter included, on the Raw tab', async () => {
+    render(<App api={markdownApi('---\nname: alpha\n---\n\n# Title\n')} />)
+
+    await openFile('SKILL.md')
+    fireEvent.click(await screen.findByRole('tab', { name: 'Raw' }))
+    const source = screen.getByRole('tabpanel', { name: 'Raw' }).querySelector('pre')
+    expect(source?.textContent).toBe('---\nname: alpha\n---\n\n# Title\n')
+    expect(screen.queryByRole('heading', { name: 'Title' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Document' }))
     expect(await screen.findByRole('heading', { name: 'Title' })).toBeInTheDocument()
+  })
+
+  it('offers no Metadata tab for markdown without frontmatter', async () => {
+    render(<App api={markdownApi('# Title\n\n---\n\nAfter a rule\n')} />)
+
+    await openFile('SKILL.md')
+    expect(await screen.findByRole('heading', { name: 'Title' })).toBeInTheDocument()
+    expect(screen.getByText('After a rule')).toBeInTheDocument()
+    const tabs = screen.getAllByRole('tab').map((tab) => tab.textContent)
+    expect(tabs).toEqual(['Document', 'Raw'])
   })
 
   it('shows non-markdown text files as plain preformatted source without a toggle', async () => {
@@ -4085,7 +4136,7 @@ describe('Skill file viewer', () => {
     const section = screen.getByRole('region', { name: 'Files' })
     const source = await within(section).findByText(/echo hi/)
     expect(source.closest('pre')).not.toBeNull()
-    expect(within(section).queryByRole('button', { name: 'Raw' })).toBeNull()
+    expect(within(section).queryByRole('tablist')).toBeNull()
   })
 
   it('shows a not viewable message for binary files instead of content', async () => {
