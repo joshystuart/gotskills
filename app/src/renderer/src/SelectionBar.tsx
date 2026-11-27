@@ -1,10 +1,11 @@
 import type { JSX } from 'react'
 import type { InstallTargetId, InstallTargetStatus } from '../../shared/ipc'
 import type { BulkInstallFailure, InstallItem, InstallWork } from './bulkInstall'
+import type { BulkUninstallFailure, UninstallItem } from './bulkUninstall'
 import type { StaleRegistryDisclosure } from './cataloguePresentation'
 import { HeldBackList, StaleDisclosures } from './StaleDisclosures'
 
-export type BulkInstallPhase =
+export type SelectionPhase =
   | { kind: 'idle' }
   | { kind: 'installing'; index: number; total: number; item: InstallItem }
   | {
@@ -16,11 +17,20 @@ export type BulkInstallPhase =
       disclosures: StaleRegistryDisclosure[]
       cancelled: boolean
     }
+  | { kind: 'uninstalling'; index: number; total: number; item: UninstallItem }
+  | {
+      kind: 'uninstall-summary'
+      uninstalled: number
+      failures: BulkUninstallFailure[]
+      cancelled: boolean
+    }
 
 interface SelectionBarProps {
   count: number
   work: InstallWork
-  phase: BulkInstallPhase
+  /** The selected Skills installed in a chosen target; m on the Uninstall button. */
+  uninstallItems: UninstallItem[]
+  phase: SelectionPhase
   targets: InstallTargetStatus[]
   chosenTargets: InstallTargetId[]
   /** True while any other operation is busy. */
@@ -32,13 +42,15 @@ interface SelectionBarProps {
   onToggleTarget: (target: InstallTargetId) => void
   onClear: () => void
   onInstall: () => void
+  onUninstall: () => void
   onCancel: () => void
   onDismiss: () => void
 }
 
 /**
  * Shown above the Catalogue rows in place of "Update all" while two or more
- * skills are selected, and while a bulk install run or its summary shows.
+ * skills are selected, and while a bulk install or uninstall run or its
+ * summary shows.
  */
 export function SelectionBar(props: SelectionBarProps): JSX.Element {
   const { phase } = props
@@ -57,6 +69,34 @@ export function SelectionBar(props: SelectionBarProps): JSX.Element {
         </>
       ) : null}
 
+      {phase.kind === 'uninstalling' ? (
+        <>
+          <span className="update-all-progress" role="status" aria-live="polite">
+            Uninstalling {phase.item.name} — {phase.index + 1} of {phase.total}
+          </span>
+          <button type="button" className="secondary update-all-cancel" onClick={props.onCancel}>
+            Cancel run
+          </button>
+        </>
+      ) : null}
+
+      {phase.kind === 'uninstall-summary' ? (
+        <div className="update-all-summary" role="status" aria-live="polite">
+          {phase.cancelled ? <p className="update-all-cancelled">Run cancelled</p> : null}
+          <p className="update-all-summary-line">
+            {phase.uninstalled} uninstalled · {phase.failures.length} failed
+          </p>
+          <FailureList failures={phase.failures} />
+          <button
+            type="button"
+            className="secondary-action update-all-dismiss"
+            onClick={props.onDismiss}
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
       {phase.kind === 'summary' ? (
         <div className="update-all-summary" role="status" aria-live="polite">
           {phase.cancelled ? <p className="update-all-cancelled">Run cancelled</p> : null}
@@ -64,15 +104,7 @@ export function SelectionBar(props: SelectionBarProps): JSX.Element {
             {phase.installed} installed · {phase.failures.length} failed · {phase.heldBack.length}{' '}
             held back
           </p>
-          {phase.failures.length > 0 ? (
-            <ul className="update-all-failures">
-              {phase.failures.map((failure) => (
-                <li key={failure.item.skillId}>
-                  {failure.item.name}: {failure.reason}
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <FailureList failures={phase.failures} />
           <HeldBackList items={phase.heldBack} disclosures={phase.disclosures} />
           <button
             type="button"
@@ -87,9 +119,27 @@ export function SelectionBar(props: SelectionBarProps): JSX.Element {
   )
 }
 
+function FailureList({
+  failures,
+}: {
+  failures: (BulkInstallFailure | BulkUninstallFailure)[]
+}): JSX.Element | null {
+  if (failures.length === 0) return null
+  return (
+    <ul className="update-all-failures">
+      {failures.map((failure) => (
+        <li key={failure.item.skillId}>
+          {failure.item.name}: {failure.reason}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function IdleBar({
   count,
   work,
+  uninstallItems,
   targets,
   chosenTargets,
   busy,
@@ -100,6 +150,7 @@ function IdleBar({
   onToggleTarget,
   onClear,
   onInstall,
+  onUninstall,
 }: SelectionBarProps): JSX.Element {
   const n = work.items.length
   const collisions = work.skippedCollisions
@@ -136,6 +187,14 @@ function IdleBar({
       </div>
       <button type="button" className="secondary" onClick={onClear}>
         Clear
+      </button>
+      <button
+        type="button"
+        className="secondary"
+        disabled={busy || uninstallItems.length === 0}
+        onClick={onUninstall}
+      >
+        Uninstall ({uninstallItems.length})
       </button>
       <button
         type="button"

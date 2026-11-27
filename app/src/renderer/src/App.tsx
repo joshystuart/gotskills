@@ -14,6 +14,7 @@ import type {
   SyncStatus,
 } from '../../shared/ipc'
 import { deriveInstallWork, runBulkInstall } from './bulkInstall'
+import { deriveUninstallWork, runBulkUninstall } from './bulkUninstall'
 import { runBulkUpdate } from './bulkUpdate'
 import { AppearanceSettings } from './AppearanceSettings'
 import { applyFontSize } from './fontSize'
@@ -51,7 +52,7 @@ import {
   type CatalogueSelection,
   type ClickModifiers,
 } from './catalogueSelection'
-import { SelectionBar, type BulkInstallPhase } from './SelectionBar'
+import { SelectionBar, type SelectionPhase } from './SelectionBar'
 import { Toolbar } from './Toolbar'
 import { UpdateAllRegion, type UpdateAllPhase } from './UpdateAllRegion'
 
@@ -111,10 +112,11 @@ export function App({ api }: AppProps): JSX.Element {
   const [runAcknowledgeStale, setRunAcknowledgeStale] = useState(false)
   const [runInFlight, setRunInFlight] = useState(false)
   const [installChips, setInstallChips] = useState<InstallTargetId[]>([])
-  const [installPhase, setInstallPhase] = useState<BulkInstallPhase>({ kind: 'idle' })
+  const [installPhase, setInstallPhase] = useState<SelectionPhase>({ kind: 'idle' })
   const [installAcknowledgeStale, setInstallAcknowledgeStale] = useState(false)
   const [installReplace, setInstallReplace] = useState(false)
   const [pendingBulkReplace, setPendingBulkReplace] = useState(false)
+  const [pendingBulkUninstall, setPendingBulkUninstall] = useState(false)
   const searchRef = useRef<HTMLInputElement | null>(null)
   /**
    * Kept live so a bulk run always dispatches against the current sync
@@ -258,6 +260,7 @@ export function App({ api }: AppProps): JSX.Element {
     pendingRemoval !== null ||
     pendingReplace !== null ||
     pendingBulkReplace ||
+    pendingBulkUninstall ||
     pendingRegistryRemoval !== null
 
   useEffect(() => {
@@ -551,6 +554,11 @@ export function App({ api }: AppProps): JSX.Element {
     { acknowledgeStale: installAcknowledgeStale, replace: installReplace, isInstalledOnly, status }
   )
 
+  const uninstallItems = deriveUninstallWork(
+    skills.filter((s) => selection.ids.has(s.id)),
+    visibleTargetIds.filter((id) => installChips.includes(id))
+  )
+
   const bulkReplacements = installWork.items.flatMap((item) => {
     const skill = skills.find((s) => s.id === item.skillId)
     if (!skill) return []
@@ -587,6 +595,29 @@ export function App({ api }: AppProps): JSX.Element {
         isCancelled: () => cancelRunRef.current,
       })
       setInstallPhase({ kind: 'summary', ...result, disclosures: work.disclosures })
+    } finally {
+      runInFlightRef.current = false
+      setRunInFlight(false)
+      setSelection(EMPTY_SELECTION)
+      await loadCatalogue()
+    }
+  }
+
+  async function onRunUninstallSelection(): Promise<void> {
+    setPendingBulkUninstall(false)
+    const items = uninstallItems
+    if (runInFlight || items.length === 0) return
+    runInFlightRef.current = true
+    cancelRunRef.current = false
+    setRunInFlight(true)
+    try {
+      const result = await runBulkUninstall({
+        api,
+        items,
+        onProgress: (progress) => setInstallPhase({ kind: 'uninstalling', ...progress }),
+        isCancelled: () => cancelRunRef.current,
+      })
+      setInstallPhase({ kind: 'uninstall-summary', ...result })
     } finally {
       runInFlightRef.current = false
       setRunInFlight(false)
@@ -887,6 +918,7 @@ export function App({ api }: AppProps): JSX.Element {
               <SelectionBar
                 count={selection.ids.size}
                 work={installWork}
+                uninstallItems={uninstallItems}
                 phase={installPhase}
                 targets={visibleTargets}
                 chosenTargets={installChips}
@@ -898,6 +930,7 @@ export function App({ api }: AppProps): JSX.Element {
                 onToggleTarget={toggleInstallChip}
                 onClear={() => setSelection(EMPTY_SELECTION)}
                 onInstall={onInstallSelection}
+                onUninstall={() => setPendingBulkUninstall(true)}
                 onCancel={cancelUpdateAll}
                 onDismiss={dismissInstallSummary}
               />
@@ -1024,6 +1057,25 @@ export function App({ api }: AppProps): JSX.Element {
           <ul className="modal-list">
             {bulkReplacements.map((replacement) => (
               <li key={replacement.key}>{replacement.text}</li>
+            ))}
+          </ul>
+        </ConfirmDialog>
+      ) : null}
+
+      {pendingBulkUninstall ? (
+        <ConfirmDialog
+          title="Uninstall skills?"
+          confirmLabel="Uninstall"
+          confirmDisabled={busy}
+          onConfirm={() => void onRunUninstallSelection()}
+          onCancel={() => setPendingBulkUninstall(false)}
+        >
+          <p>Uninstall these skills from:</p>
+          <ul className="modal-list">
+            {uninstallItems.map((item) => (
+              <li key={item.skillId}>
+                {item.name}: {item.targets.map((target) => targetLabel(targets, target)).join(', ')}
+              </li>
             ))}
           </ul>
         </ConfirmDialog>

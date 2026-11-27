@@ -316,7 +316,8 @@ export interface RowAttention {
   collision: boolean
 }
 
-const INSTALLED_LIKE: ReconcileState[] = [
+/** The states that mean Got Skills installed the Skill in a target, so it can be uninstalled there. */
+export const INSTALLED_LIKE: ReconcileState[] = [
   'installed',
   'update-available',
   'needs-repair',
