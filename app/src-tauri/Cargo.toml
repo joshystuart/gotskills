@@ -4,7 +4,7 @@ version = "0.0.13"
 description = "Got Skills, an internal app store for agent skills"
 authors = ["Got Skills"]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.91"
 
 [lib]
 name = "got_skills_lib"
@@ -17,16 +17,16 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 thiserror = "2"
 regex = "1"
 url = "2"
-dirs = "6"
+dirs = "7"
 serde_yaml = "0.9.34"
-sha2 = "0.10"
-notify = "8"
+sha2 = "0.11"
+notify = "9"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"

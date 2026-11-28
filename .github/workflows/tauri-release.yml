@@ -124,7 +124,7 @@ jobs:
         run: npm run build -- --target ${{ matrix.target }} --no-bundle --config '{"bundle":{"createUpdaterArtifacts":true}}'
 
       - name: Upload release binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-bin-${{ matrix.target }}
           path: app/src-tauri/target/${{ matrix.target }}/release/got-skills
@@ -170,7 +170,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Download release binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-bin-*
           path: release-binaries
@@ -275,7 +275,7 @@ jobs:
 
       - name: Upload dry-run bundles
         if: inputs.dry_run == true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: universal-dry-run
           path: app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg

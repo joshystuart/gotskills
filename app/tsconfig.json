@@ -19,8 +19,8 @@
   },
   "include": [
     "src",
-    "vite.config.ts",
-    "vitest.config.ts",
+    "vite.config.mts",
+    "vitest.config.mts",
     "vitest.setup.ts",
     "scripts/**/*.test.ts"
   ]
