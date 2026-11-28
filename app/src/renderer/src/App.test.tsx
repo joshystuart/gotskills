@@ -5406,11 +5406,8 @@ describe('Catalogue multi-selection', () => {
 
       fireEvent.click(within(bar()).getByRole('button', { name: 'Uninstall (2)' }))
       const dialog = screen.getByRole('alertdialog', { name: 'Uninstall skills?' })
-      expect(
-        within(dialog)
-          .getAllByRole('listitem')
-          .map((item) => item.textContent)
-      ).toEqual(['Beta: Claude Code', 'Gamma: Claude Code, Cursor'])
+      expect(within(dialog).queryByRole('list')).not.toBeInTheDocument()
+      expect(dialog).toHaveTextContent('Uninstall 2 skills from Claude Code, Cursor?')
       fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
       expect(uninstall).not.toHaveBeenCalled()
