@@ -27,6 +27,7 @@ import {
   type SyncAllResult,
   type SyncStatus,
   type TargetDetection,
+  type UninstallResult,
 } from '../../shared/ipc'
 
 const REG = 'reg-1'
@@ -5325,6 +5326,121 @@ describe('Catalogue multi-selection', () => {
       })
       expect(await within(bar()).findByRole('button', { name: 'Install (1)' })).toBeInTheDocument()
       expect(selectionCount()).toHaveTextContent('3 selected · 2 skipped')
+    })
+  })
+
+  describe('uninstalling the selection', () => {
+    const INSTALLED = [
+      skill({
+        id: 'alpha',
+        name: 'Alpha',
+        description: 'a',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'not-installed' },
+          { target: '~/.agents/skills', state: 'external', occupant: { kind: 'folder' } },
+        ],
+      }),
+      skill({
+        id: 'beta',
+        name: 'Beta',
+        description: 'b',
+        perTarget: [
+          { target: '~/.claude/skills', state: 'installed' },
+          { target: '~/.agents/skills', state: 'not-installed' },
+        ],
+      }),
+      skill({
+        id: 'gamma',
+        name: 'Gamma',
+        description: 'c',
+        orphaned: true,
+        perTarget: [
+          { target: '~/.claude/skills', state: 'update-available' },
+          { target: '~/.agents/skills', state: 'installed' },
+        ],
+      }),
+    ]
+
+    function bar(): HTMLElement {
+      return screen.getByRole('region', { name: 'Selection' })
+    }
+
+    function selectAll(): void {
+      fireEvent.click(row('Alpha'))
+      fireEvent.click(row('Gamma'), { shiftKey: true })
+    }
+
+    it('counts the selected skills installed in a chosen target, leaving collisions alone', async () => {
+      await renderList(INSTALLED)
+      selectAll()
+      expect(within(bar()).getByRole('button', { name: 'Uninstall (2)' })).toBeEnabled()
+
+      fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Claude Code' }))
+      expect(within(bar()).getByRole('button', { name: 'Uninstall (1)' })).toBeEnabled()
+
+      fireEvent.click(within(bar()).getByRole('checkbox', { name: 'Cursor' }))
+      expect(within(bar()).getByRole('button', { name: 'Uninstall (0)' })).toBeDisabled()
+    })
+
+    it('asks first, then uninstalls one skill at a time and shows the summary', async () => {
+      const first = deferred<UninstallResult>()
+      const uninstall = vi
+        .fn()
+        .mockReturnValueOnce(first.promise)
+        .mockResolvedValueOnce({
+          registryId: REG,
+          folderName: 'gamma',
+          skillId: `${REG}/gamma`,
+          perTarget: [
+            { target: '~/.claude/skills', outcome: 'installed', paths: [] },
+            {
+              target: '~/.agents/skills',
+              outcome: 'failed',
+              paths: [],
+              error: 'Permission denied',
+            },
+          ],
+        })
+      await renderList(INSTALLED, { uninstall })
+      selectAll()
+
+      fireEvent.click(within(bar()).getByRole('button', { name: 'Uninstall (2)' }))
+      const dialog = screen.getByRole('alertdialog', { name: 'Uninstall skills?' })
+      expect(
+        within(dialog)
+          .getAllByRole('listitem')
+          .map((item) => item.textContent)
+      ).toEqual(['Beta: Claude Code', 'Gamma: Claude Code, Cursor'])
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+      expect(uninstall).not.toHaveBeenCalled()
+
+      fireEvent.click(within(bar()).getByRole('button', { name: 'Uninstall (2)' }))
+      fireEvent.click(
+        within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Uninstall' })
+      )
+      expect(await within(bar()).findByText('Uninstalling Beta — 1 of 2')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Refresh catalogue' })).toBeDisabled()
+      await act(async () => {
+        first.resolve({
+          registryId: REG,
+          folderName: 'beta',
+          skillId: `${REG}/beta`,
+          perTarget: [],
+        })
+        await first.promise
+      })
+
+      expect(await within(bar()).findByText('1 uninstalled · 1 failed')).toBeInTheDocument()
+      expect(within(bar()).getByText('Gamma: Permission denied')).toBeInTheDocument()
+      expect(uninstall.mock.calls.map(([req]) => req)).toEqual([
+        { registryId: REG, folderName: 'beta', targets: ['~/.claude/skills'] },
+        { registryId: REG, folderName: 'gamma', targets: ['~/.claude/skills', '~/.agents/skills'] },
+      ])
+      expect(row('Beta')).toHaveAttribute('aria-selected', 'false')
+
+      fireEvent.click(within(bar()).getByRole('button', { name: 'Dismiss' }))
+      expect(screen.queryByRole('region', { name: 'Selection' })).not.toBeInTheDocument()
     })
   })
 })
