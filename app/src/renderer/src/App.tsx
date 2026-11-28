@@ -1070,14 +1070,14 @@ export function App({ api }: AppProps): JSX.Element {
           onConfirm={() => void onRunUninstallSelection()}
           onCancel={() => setPendingBulkUninstall(false)}
         >
-          <p>Uninstall these skills from:</p>
-          <ul className="modal-list">
-            {uninstallItems.map((item) => (
-              <li key={item.skillId}>
-                {item.name}: {item.targets.map((target) => targetLabel(targets, target)).join(', ')}
-              </li>
-            ))}
-          </ul>
+          <p>
+            Uninstall {uninstallItems.length} {uninstallItems.length === 1 ? 'skill' : 'skills'}{' '}
+            from{' '}
+            {[...new Set(uninstallItems.flatMap((item) => item.targets))]
+              .map((target) => targetLabel(targets, target))
+              .join(', ')}
+            ?
+          </p>
         </ConfirmDialog>
       ) : null}
 
