@@ -8,6 +8,6 @@
     "check": "npm run format:check && cd app && npm run typecheck && npm test && npm run test:rust && node --test scripts/check-app-size.test.cjs"
   },
   "devDependencies": {
-    "prettier": "^3.9.9"
+    "prettier": "^3.10.1"
   }
 }

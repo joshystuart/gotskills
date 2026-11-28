@@ -63,6 +63,10 @@ fn hash_field(hash: &mut Sha256, bytes: &[u8]) {
     hash.update(bytes);
 }
 
+fn hex_digest(hash: Sha256) -> String {
+    hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 fn hash_tree(root: &Path, directory: &Path, hash: &mut Sha256) -> io::Result<SystemTime> {
     let mut entries = fs::read_dir(directory)?.collect::<io::Result<Vec<_>>>()?;
     entries.sort_by_key(|entry| entry.file_name());
@@ -145,7 +149,7 @@ where
             let mut hash = Sha256::new();
             let updated =
                 hash_tree(&copied, &copied, &mut hash).map_err(SnapshotError::SaveFailed)?;
-            let content_hash = format!("{:x}", hash.finalize());
+            let content_hash = hex_digest(hash);
             skills.push(ScannedSkill {
                 id: metadata.name.clone(),
                 skill_path: relative.to_string_lossy().replace('\\', "/"),
@@ -168,7 +172,7 @@ where
         }
         let snapshot = LocalSnapshot {
             skills,
-            revision: format!("{:x}", revision.finalize()),
+            revision: hex_digest(revision),
         };
         Ok(snapshot)
     })();
@@ -244,6 +248,16 @@ mod tests {
             root,
             &format!("{path}/SKILL.md"),
             &format!("---\nname: {name}\ndescription: Example\n---\nBody"),
+        );
+    }
+
+    #[test]
+    fn hex_digest_is_lowercase_sha256_hex() {
+        let mut hash = Sha256::new();
+        hash.update(b"abc");
+        assert_eq!(
+            hex_digest(hash),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
     }
 

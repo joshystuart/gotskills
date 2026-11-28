@@ -70,10 +70,14 @@ describe('bannedRustCommentLines', () => {
 describe('app source', () => {
   it('has no banned comments', () => {
     const appRoot = path.resolve(__dirname, '..')
-    const files = execFileSync('git', ['ls-files', '*.ts', '*.tsx', '*.js', '*.mjs', '*.cjs'], {
-      cwd: appRoot,
-      encoding: 'utf8',
-    })
+    const files = execFileSync(
+      'git',
+      ['ls-files', '*.ts', '*.tsx', '*.js', '*.mjs', '*.mts', '*.cjs'],
+      {
+        cwd: appRoot,
+        encoding: 'utf8',
+      }
+    )
       .split('\n')
       .filter(Boolean)
     const violations = files.flatMap((file) =>
