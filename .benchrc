@@ -46,6 +46,15 @@ variants:
       - ~/.agents/skills/implement-spec
       - ~/.agents/skills/tdd
       - ~/.agents/skills/code-review
+  - name: pocock-serial
+    prompt: .bench/prompts/pocock-serial.md
+    model: claude-sonnet-5-5
+    effort: medium
+    repeats: 3
+    skills:
+      - ~/.agents/skills/implement-spec-serial
+      - ~/.agents/skills/tdd
+      - ~/.agents/skills/code-review
   - name: pipeline-subagents
     prompt: .bench/prompts/pipeline-subagents.md
     model: claude-sonnet-5-5
@@ -59,6 +68,15 @@ variants:
       - ~/.agents/skills/xf-plan-spec
       - ~/.agents/skills/xf-plan-tickets
       - ~/.agents/skills/xf-review
+  - name: serial-review
+    prompt: .bench/prompts/serial-review.md
+    model: claude-sonnet-5-5
+    effort: medium
+    repeats: 3
+    skills:
+      - ~/.agents/skills/xf-build-serial
+      - ~/.agents/skills/xf-common
+      - ~/.agents/skills/xf-review
 judges:
   - name: terra
     type: api
@@ -68,9 +86,5 @@ judges:
     type: api
     model: openrouter/openai/gpt-6.1-sol
     limits: { timeout_minutes: 20 }
-    compare: { max_pairs: 18 } # each Trial once against each other Variant
-  - name: gemini
-    type: api
-    model: openrouter/google/gemini-4-argon
-    limits: { timeout_minutes: 20 }
+    compare: { max_pairs: 45 } # each Trial once against each other Variant
 merge_judge: terra
